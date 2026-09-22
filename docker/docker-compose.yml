@@ -1,0 +1,42 @@
+services:
+  # Headless build + unit tests. This is what CI runs.
+  arb-ci:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        UID: "${UID:-1000}"
+        GID: "${GID:-1000}"
+    image: autonomous-robot-brain:jazzy
+    volumes:
+      - ..:/workspace:rw
+    working_dir: /workspace/ros2_ws
+    command: >
+      bash -c "colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+               && colcon test --event-handlers console_direct+
+               && colcon test-result --verbose"
+
+  # Interactive shell with GUI forwarding (X11). Requires `xhost +local:docker`
+  # on the host. On a hybrid Intel/NVIDIA laptop you may also need the NVIDIA
+  # Container Toolkit; the native install avoids all of this.
+  arb-gui:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        UID: "${UID:-1000}"
+        GID: "${GID:-1000}"
+    image: autonomous-robot-brain:jazzy
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - LIBGL_ALWAYS_SOFTWARE=${LIBGL_ALWAYS_SOFTWARE:-0}
+    volumes:
+      - ..:/workspace:rw
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    network_mode: host
+    ipc: host
+    working_dir: /workspace/ros2_ws
+    stdin_open: true
+    tty: true
+    command: bash

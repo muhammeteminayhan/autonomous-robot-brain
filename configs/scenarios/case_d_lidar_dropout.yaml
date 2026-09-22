@@ -1,0 +1,16 @@
+# CASE D -- 60 % of beams return inf. Scan matching degrades but does not stop.
+# Tests the NIS chi-square gate: a scan match computed from too few beams has
+# a large innovation and must be REJECTED rather than fused.
+scenario:
+  id: "case_d_lidar_dropout"
+  description: "60 % of LiDAR beams dropped in bursts."
+  duration_s: 120.0
+  faults:
+    - type: "lidar_dropout"
+      onset_s: 25.0
+      duration_s: 95.0
+      params:
+        dropout_ratio: 0.60
+        burst_mode: true
+        burst_on_s: 3.0
+        burst_off_s: 2.0

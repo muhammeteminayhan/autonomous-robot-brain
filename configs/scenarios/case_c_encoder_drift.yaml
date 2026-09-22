@@ -1,0 +1,16 @@
+# CASE C -- the nastiest realistic fault. A constant bias on ONE wheel is
+# indistinguishable from a genuine turn if you only look at the encoders, so
+# dead reckoning curves away silently. Only an independent heading source
+# (gyro) or an absolute source (LiDAR scan match) can catch it.
+scenario:
+  id: "case_c_encoder_drift"
+  description: "Right wheel encoder accumulates a +0.05 rad/s bias."
+  duration_s: 120.0
+  faults:
+    - type: "encoder_drift"
+      onset_s: 15.0
+      duration_s: 105.0
+      params:
+        wheel: "right"
+        bias_rad_s: 0.05
+        ramp_time_s: 5.0     # bias grows linearly over 5 s, not a step

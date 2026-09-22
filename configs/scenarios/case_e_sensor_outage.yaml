@@ -1,0 +1,18 @@
+# CASE E -- a sensor stops publishing entirely for 10 s, twice. This is the
+# scenario that exposes whether the filter is written correctly: with no
+# measurement, the EKF must keep PREDICTING (covariance grows without bound)
+# and must then RE-CONVERGE when data returns. A filter that crashes, freezes
+# or silently reuses the last measurement fails here.
+scenario:
+  id: "case_e_sensor_outage"
+  description: "Complete IMU outage 30-40 s; complete LiDAR outage 70-80 s."
+  duration_s: 120.0
+  faults:
+    - type: "sensor_outage"
+      onset_s: 30.0
+      duration_s: 10.0
+      params: { sensor: "imu" }
+    - type: "sensor_outage"
+      onset_s: 70.0
+      duration_s: 10.0
+      params: { sensor: "lidar" }

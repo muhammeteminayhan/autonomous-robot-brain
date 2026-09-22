@@ -1,0 +1,21 @@
+# CASE F -- simultaneous degradation. Individually survivable faults can
+# compound: encoder drift removes the odometry reference at the same moment
+# IMU noise removes the heading reference. This is the worst case and the one
+# worth discussing in an interview.
+scenario:
+  id: "case_f_multi_degradation"
+  description: "Encoder drift + 5x IMU noise + 30 % LiDAR dropout, overlapping."
+  duration_s: 120.0
+  faults:
+    - type: "encoder_drift"
+      onset_s: 20.0
+      duration_s: 100.0
+      params: { wheel: "left", bias_rad_s: 0.04, ramp_time_s: 5.0 }
+    - type: "imu_high_noise"
+      onset_s: 40.0
+      duration_s: 60.0
+      params: { noise_scale: 5.0, affect_accelerometer: false }
+    - type: "lidar_dropout"
+      onset_s: 50.0
+      duration_s: 70.0
+      params: { dropout_ratio: 0.30, burst_mode: false }

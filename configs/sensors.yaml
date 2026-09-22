@@ -1,0 +1,72 @@
+# =============================================================================
+# Nominal sensor specifications and the NOISE MODEL applied on top of them.
+#
+# Gazebo can already add Gaussian noise inside the SDF, but we deliberately add
+# a second, ROS-side noise/fault layer in arb_sensors. Reasons:
+#   1. It can be changed at runtime (ros2 param set) without restarting Gazebo.
+#   2. It can model faults Gazebo cannot express: slowly accumulating bias,
+#      beam dropout patterns, complete sensor outage for N seconds.
+#   3. It keeps the fault-injection logic (Phase 10) in ONE reviewable place
+#      instead of scattered across world files.
+#
+# All sigmas are 1-standard-deviation values in SI units.
+# =============================================================================
+
+imu:
+  rate_hz: 200.0
+  topic_raw: "/imu/data_raw"
+  topic_out: "/arb/imu"
+
+  # MEMS-grade IMU, roughly a BNO055 / MPU-9250 class device.
+  gyroscope:
+    noise_density_rad_s_sqrt_hz: 0.00035   # white noise
+    bias_stability_rad_s: 0.00020          # slowly varying turn-on bias
+    bias_random_walk_rad_s2: 0.00002       # how fast the bias itself drifts
+    scale_factor_error: 0.002              # 0.2 % gain error
+  accelerometer:
+    noise_density_m_s2_sqrt_hz: 0.0035
+    bias_stability_m_s2: 0.0050
+    bias_random_walk_m_s3: 0.0004
+    scale_factor_error: 0.003
+
+  # Only the z-axis gyro and the x/y accelerometers matter for a planar robot;
+  # the rest are published but unused by the estimator.
+  use_axes: ["gyro_z", "accel_x", "accel_y"]
+
+wheel_encoder:
+  rate_hz: 50.0
+  topic_out: "/arb/wheel_states"
+
+  # Quadrature encoder resolution. Quantisation is a real error source: with
+  # 1024 counts/rev the smallest resolvable wheel rotation is 2*pi/4096 rad,
+  # which at r = 0.06 m is ~0.09 mm of arc length.
+  counts_per_revolution: 1024
+  quadrature_multiplier: 4
+  velocity_noise_sigma_rad_s: 0.010
+  # Multiplicative slip: fraction of commanded rotation that does not reach
+  # the ground. Asymmetric slip is what curves an otherwise straight run.
+  slip_ratio_mean: 0.00
+  slip_ratio_sigma: 0.01
+
+lidar:
+  rate_hz: 10.0
+  topic_raw: "/scan_raw"
+  topic_out: "/arb/scan"
+
+  # 2D planar scanner, roughly RPLIDAR A2 class.
+  samples: 360
+  angle_min_rad: -3.14159265358979
+  angle_max_rad: 3.14159265358979
+  range_min_m: 0.12
+  range_max_m: 12.0
+  range_noise_sigma_m: 0.015
+  # Beams that hit nothing come back as +inf; beams closer than range_min come
+  # back as -inf. Downstream code must handle both, never assume finite.
+  dropout_probability: 0.00
+
+ground_truth:
+  # EVALUATION ONLY. Never subscribed to by arb_localization, arb_mapping,
+  # arb_planning or arb_control. Enforced by a test in tests/integration.
+  rate_hz: 100.0
+  topic: "/arb/ground_truth/pose"
+  enabled: true

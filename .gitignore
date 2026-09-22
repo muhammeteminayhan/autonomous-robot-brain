@@ -1,0 +1,45 @@
+# ---- ROS 2 / colcon ----
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+build/
+install/
+log/
+*.pyc
+__pycache__/
+.pytest_cache/
+
+# ---- CMake ----
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+
+# ---- Generated experiment output ----
+# Raw rosbags and large intermediate data are NOT versioned.
+results/**/*.bag
+results/**/*.db3
+results/**/*.mcap
+results/**/raw/
+experiments/**/raw/
+*.log
+
+# Plots and benchmark tables ARE versioned (they are the deliverable):
+!results/**/*.png
+!results/**/*.csv
+!results/**/*.md
+
+# ---- Gazebo ----
+.gazebo/
+.gz/
+
+# ---- Editors / OS ----
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# ---- Python venv ----
+.venv/
+venv/

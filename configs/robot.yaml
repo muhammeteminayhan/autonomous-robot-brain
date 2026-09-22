@@ -1,0 +1,62 @@
+# =============================================================================
+# Physical description of the differential-drive platform.
+#
+# This file is the SINGLE SOURCE OF TRUTH for the robot's geometry. The URDF,
+# the odometry node, the EKF and the controller all read these numbers rather
+# than hard-coding them, because a mismatch between the simulated wheel radius
+# and the one used by the odometry equations produces a *systematic* scale
+# error that looks exactly like sensor drift and is brutal to debug.
+# =============================================================================
+
+robot:
+  name: "arb_diffdrive"
+
+  chassis:
+    length_m: 0.400
+    width_m: 0.300
+    height_m: 0.120
+    mass_kg: 8.0
+    # Height of the chassis underside above the ground plane.
+    ground_clearance_m: 0.040
+
+  drive:
+    # Distance between the two driven wheel contact points. Appears as `L` in
+    # the inverse kinematics  omega = (v_r - v_l) / L.
+    wheel_separation_m: 0.320
+    wheel_radius_m: 0.060
+    wheel_width_m: 0.035
+    wheel_mass_kg: 0.5
+
+    # Actuator limits. The controller must never command beyond these, and the
+    # DWA velocity window is built directly from them.
+    max_wheel_speed_rad_s: 12.0        # -> v_max = r * w = 0.72 m/s
+    max_linear_velocity_m_s: 0.70
+    min_linear_velocity_m_s: -0.30     # reversing is allowed but slower
+    max_angular_velocity_rad_s: 2.00
+    max_linear_acceleration_m_s2: 1.00
+    max_angular_acceleration_rad_s2: 3.00
+
+  caster:
+    # A passive spherical caster keeps the chassis statically stable without
+    # adding a third controlled degree of freedom.
+    radius_m: 0.035
+    x_offset_m: -0.150
+
+  frames:
+    # REP-105 frame convention. map -> odom -> base_link is the canonical chain.
+    map: "map"
+    odom: "odom"
+    base_link: "base_link"
+    base_footprint: "base_footprint"
+    imu: "imu_link"
+    lidar: "lidar_link"
+
+  sensor_mounts:
+    # Extrinsics: pose of each sensor frame in base_link. These become the
+    # static TF tree and must match the URDF exactly.
+    imu:
+      xyz_m: [0.000, 0.000, 0.080]
+      rpy_rad: [0.0, 0.0, 0.0]
+    lidar:
+      xyz_m: [0.140, 0.000, 0.150]
+      rpy_rad: [0.0, 0.0, 0.0]

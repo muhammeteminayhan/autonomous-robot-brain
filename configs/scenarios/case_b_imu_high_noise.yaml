@@ -1,0 +1,14 @@
+# CASE B -- the gyro becomes 10x noisier, e.g. severe vibration or a failing
+# MEMS element. Tests whether the EKF correctly DOWN-weights the IMU by
+# widening R_imu, instead of blindly trusting it.
+scenario:
+  id: "case_b_imu_high_noise"
+  description: "Gyroscope noise inflated 10x from t = 20 s onwards."
+  duration_s: 120.0
+  faults:
+    - type: "imu_high_noise"
+      onset_s: 20.0
+      duration_s: 100.0
+      params:
+        noise_scale: 10.0
+        affect_accelerometer: true

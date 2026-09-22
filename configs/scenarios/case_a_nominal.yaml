@@ -1,0 +1,6 @@
+# CASE A -- baseline. Every other scenario is measured against this one.
+scenario:
+  id: "case_a_nominal"
+  description: "All sensors healthy at their datasheet noise levels."
+  duration_s: 120.0
+  faults: []
