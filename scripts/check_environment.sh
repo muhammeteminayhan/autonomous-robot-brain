@@ -86,6 +86,17 @@ for mod in numpy scipy matplotlib pytest; do
   fi
 done
 
+blue "== Workspace path =="
+# ROS 2's rosidl CMake code splits paths on non-ASCII bytes, so a workspace at
+# e.g. /home/user/Masaüstü/... fails to build with a confusing
+# "Target dependency '/home/user/Masa' does not exist". Catch it here instead.
+REPO_ROOT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+if printf '%s' "${REPO_ROOT_PATH}" | LC_ALL=C grep -q '[^ -~]'; then
+  bad "Workspace path" "non-ASCII characters in ${REPO_ROOT_PATH} -- rosidl will fail"
+else
+  ok "Workspace path" "ASCII-clean: ${REPO_ROOT_PATH}"
+fi
+
 blue "== Graphics =="
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && ok "Display" "DISPLAY=${DISPLAY:-none} WAYLAND=${WAYLAND_DISPLAY:-none}" \
                                           || soft "Display" "no display -- GUI (Gazebo/RViz) will not open"

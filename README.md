@@ -5,13 +5,11 @@ Gazebo estimates its own pose from noisy IMU, wheel-encoder and 2D LiDAR data,
 maps its surroundings, plans a collision-free route to a goal, and keeps doing
 so while its sensors are deliberately degraded and failed.
 
-> **Project status: Phase 0 of 12 complete.**
-> The repository skeleton, build system, shared math library, custom interfaces,
-> configuration schema and architectural guards are in place and statically
-> verified. Compilation and simulation are **not yet verified** — the toolchain
-> is still being installed on the development machine. See
-> [Verification status](#verification-status) for exactly what has and has not
-> been run.
+> **Project status: Phase 0 of 12 complete and verified.**
+> The workspace builds clean (11/11 packages) and all 20 unit tests plus the
+> architecture guards pass on ROS 2 Jazzy / Gazebo Harmonic / Ubuntu 24.04.
+> Simulation (Phase 1) is next. See
+> [Verification status](#verification-status) for exactly what has been run.
 
 ---
 
@@ -120,6 +118,31 @@ development path because Gazebo and RViz both want direct GPU and X11 access.
 
 ---
 
+## Known environment pitfalls
+
+**The workspace path must be ASCII-only.** ROS 2's `rosidl` CMake code splits
+interface paths on non-ASCII bytes. A workspace under, say, the Turkish desktop
+folder `~/Masaüstü/` fails with a message that names a path which does not
+exist:
+
+```
+CMake Error ... Target dependency '/home/user/Masa' does not exist
+CMake Error ... list index: 1 out of range (-1, 0)
+```
+
+Nothing in that error mentions encoding, which makes it expensive to diagnose.
+This repository therefore lives at an ASCII path and both
+`scripts/check_environment.sh` and `scripts/build.sh` refuse to run if the
+resolved workspace path contains non-ASCII characters. The build scripts use
+`pwd -P` so the build still works when the repo is reached through a symlink
+placed in a non-ASCII directory.
+
+**ROS setup scripts are incompatible with `set -u`.** `/opt/ros/jazzy/setup.bash`
+dereferences `AMENT_TRACE_SETUP_FILES` before defining it, so any script with
+`set -euo pipefail` aborts on `source`. All scripts here use `set -eo pipefail`.
+
+---
+
 ## Build and test
 
 ```bash
@@ -181,16 +204,18 @@ the hardest bugs in this whole project to find after the fact.
 This project distinguishes between *written* and *verified*. Nothing is claimed
 to work until it has been executed.
 
-| Item | Status |
-|---|---|
-| Repository structure, 11 ROS 2 packages | ✅ created |
-| `package.xml` well-formedness, name/build-type consistency | ✅ verified (static parse of all 11) |
-| `.msg` definitions conform to rosidl grammar | ✅ verified (static parse) |
-| YAML configs parse | ✅ verified |
-| Ground-truth isolation guard | ✅ verified — passes, and **fails correctly** when a violation is injected |
-| `colcon build` compiles | ❌ **not verified** — toolchain not yet installed |
-| `arb_core` gtest suite passes | ❌ **not verified** — no compiler available yet |
-| Gazebo simulation runs | ❌ not implemented (Phase 1) |
+| Item | Status | Evidence |
+|---|---|---|
+| Environment (ROS 2 Jazzy, Gazebo Sim 8.15.0, g++ 13.3, CMake 3.28, Eigen 3.4) | ✅ verified | `./scripts/check_environment.sh` → *Environment OK (0 warnings)* |
+| `colcon build` | ✅ verified | 11/11 packages finished, zero stderr |
+| `arb_core` gtest suite | ✅ verified | 17 tests, 0 failures |
+| `arb_evaluation` lint (flake8 + pep257) | ✅ verified | 2 tests, 0 failures |
+| **Total unit tests** | ✅ verified | **20 tests, 0 errors, 0 failures** |
+| Ground-truth isolation guard | ✅ verified | passes, and **fails correctly** when a violation is injected |
+| `package.xml` / `.msg` / YAML well-formedness | ✅ verified | static parse of all 11 packages |
+| Gazebo simulation runs | ❌ not implemented | Phase 1 |
+| EKF, mapping, planning, control | ❌ not implemented | Phases 4–9 |
+
 
 ---
 
