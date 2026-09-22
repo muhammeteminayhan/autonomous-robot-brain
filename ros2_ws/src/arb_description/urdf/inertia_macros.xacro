@@ -1,0 +1,72 @@
+<?xml version="1.0"?>
+<!--
+  Analytic inertia tensors for primitive shapes.
+
+  WHY THIS MATTERS
+  ================
+  Almost every beginner URDF contains a placeholder inertia such as
+  ixx = iyy = izz = 0.001 copied onto every link. The model then *looks*
+  correct in RViz and behaves absurdly in physics: a chassis with 1000x too
+  little rotational inertia snaps around on the first wheel torque, the solver
+  fights itself, and the resulting odometry is garbage that cannot be fixed
+  anywhere downstream.
+
+  The tensors below are the standard results for uniform-density solids about
+  their centre of mass. They are exact, so the only remaining modelling error is
+  the uniform-density assumption itself.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Solid cuboid, sides (x, y, z), about its centre.
+       I_xx = m/12 * (y^2 + z^2), and cyclically. -->
+  <xacro:macro name="box_inertia" params="m x y z">
+    <inertial>
+      <mass value="${m}"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia
+        ixx="${m * (y*y + z*z) / 12.0}" ixy="0.0" ixz="0.0"
+        iyy="${m * (x*x + z*z) / 12.0}" iyz="0.0"
+        izz="${m * (x*x + y*y) / 12.0}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- Solid cylinder whose symmetry axis is the link's +Y axis (the usual
+       orientation for a wheel in URDF, where the joint also spins about Y).
+       About the symmetry axis: I = 1/2 m r^2.
+       About a perpendicular axis: I = 1/12 m (3 r^2 + h^2). -->
+  <xacro:macro name="cylinder_inertia_y" params="m r h">
+    <inertial>
+      <mass value="${m}"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia
+        ixx="${m * (3.0*r*r + h*h) / 12.0}" ixy="0.0" ixz="0.0"
+        iyy="${m * r * r / 2.0}"            iyz="0.0"
+        izz="${m * (3.0*r*r + h*h) / 12.0}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- Solid sphere: I = 2/5 m r^2 about every axis through the centre. -->
+  <xacro:macro name="sphere_inertia" params="m r">
+    <inertial>
+      <mass value="${m}"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia
+        ixx="${2.0 * m * r * r / 5.0}" ixy="0.0" ixz="0.0"
+        iyy="${2.0 * m * r * r / 5.0}" iyz="0.0"
+        izz="${2.0 * m * r * r / 5.0}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- A massless-but-legal inertial block for pure frame links (imu_link,
+       lidar_link, base_footprint). URDF forbids zero mass on a link that has
+       no children in some tools, so we use a token 1 g and a tiny tensor.
+       These links carry no collision geometry, so they never affect dynamics. -->
+  <xacro:macro name="frame_inertia">
+    <inertial>
+      <mass value="0.001"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="1e-7" ixy="0.0" ixz="0.0" iyy="1e-7" iyz="0.0" izz="1e-7"/>
+    </inertial>
+  </xacro:macro>
+
+</robot>

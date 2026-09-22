@@ -1,0 +1,62 @@
+# =============================================================================
+# ros_gz_bridge topic map.
+#
+# Gazebo and ROS 2 are separate middlewares (gz-transport and DDS). Nothing
+# crosses between them unless it is listed here. A sensor that is configured
+# correctly in the URDF but missing from this file publishes happily inside
+# Gazebo and is completely invisible to ROS -- a silent failure that looks
+# identical to a broken sensor.
+#
+# `direction` matters: every bridged topic costs a serialise/deserialise on
+# every message, so commands go one way and sensor data the other, never both.
+# =============================================================================
+
+# --- clock ------------------------------------------------------------------
+# Must be bridged first in spirit: every node runs with use_sim_time=true, so
+# without /clock the whole graph sits at time zero, TF lookups fail with
+# "requested time is in the future", and nothing works.
+- ros_topic_name: "/clock"
+  gz_topic_name: "/clock"
+  ros_type_name: "rosgraph_msgs/msg/Clock"
+  gz_type_name: "gz.msgs.Clock"
+  direction: GZ_TO_ROS
+
+# --- actuation (ROS -> Gazebo) ----------------------------------------------
+- ros_topic_name: "/cmd_vel"
+  gz_topic_name: "/cmd_vel"
+  ros_type_name: "geometry_msgs/msg/Twist"
+  gz_type_name: "gz.msgs.Twist"
+  direction: ROS_TO_GZ
+
+# --- proprioceptive sensors (Gazebo -> ROS) ---------------------------------
+# Wheel encoders. gz publishes a Model message; the bridge converts it to a
+# JointState whose position[] is the accumulated wheel angle in radians and
+# velocity[] the wheel rate in rad/s.
+- ros_topic_name: "/joint_states"
+  gz_topic_name: "/joint_states"
+  ros_type_name: "sensor_msgs/msg/JointState"
+  gz_type_name: "gz.msgs.Model"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/imu/data_raw"
+  gz_topic_name: "/imu/data_raw"
+  ros_type_name: "sensor_msgs/msg/Imu"
+  gz_type_name: "gz.msgs.IMU"
+  direction: GZ_TO_ROS
+
+# --- exteroceptive sensor (Gazebo -> ROS) -----------------------------------
+- ros_topic_name: "/scan_raw"
+  gz_topic_name: "/scan_raw"
+  ros_type_name: "sensor_msgs/msg/LaserScan"
+  gz_type_name: "gz.msgs.LaserScan"
+  direction: GZ_TO_ROS
+
+# --- ground truth (Gazebo -> ROS) -------------------------------------------
+# EVALUATION ONLY. Bridged so arb_evaluation can compute error metrics offline.
+# No estimation, mapping, planning or control node may subscribe to it; see
+# docs/architecture.md section 4 and tests/integration/.
+- ros_topic_name: "/arb/ground_truth/odom"
+  gz_topic_name: "/ground_truth/odom"
+  ros_type_name: "nav_msgs/msg/Odometry"
+  gz_type_name: "gz.msgs.Odometry"
+  direction: GZ_TO_ROS

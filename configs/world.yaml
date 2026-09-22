@@ -1,0 +1,96 @@
+# =============================================================================
+# Floor plan for the simulated environment, in metres, origin at the centre.
+#
+# The Gazebo world is GENERATED from this file by scripts/generate_world.py
+# rather than hand-written as SDF. Three reasons:
+#   1. A 20 x 14 m floor plan is ~35 wall segments. As raw SDF that is ~700
+#      lines of near-identical <model> blocks -- unreviewable, and a typo in one
+#      pose silently leaves a hole a LiDAR ray can escape through.
+#   2. The same plan is needed by the evaluation code to draw a reference map
+#      under the trajectory plots (Phase 5) and to compute map accuracy against
+#      a known ground truth occupancy grid (Phase 6). One source, two consumers.
+#   3. Phase 8 (dynamic obstacles) and Phase 11 (experiment sweeps) need to vary
+#      the environment programmatically.
+#
+# Walls are axis-aligned segments given as [x1, y1, x2, y2] of their CENTRELINE.
+# Doorways are modelled by simply leaving a gap between two segments.
+# =============================================================================
+
+world:
+  name: "arb_indoor"
+  # Physics step. 1 ms is small enough that wheel contact stays stable at
+  # 0.7 m/s; real_time_factor is left uncapped so batch experiments run fast.
+  physics_step_s: 0.001
+  gravity_m_s2: [0.0, 0.0, -9.81]
+
+  bounds:
+    x_min: -10.0
+    x_max: 10.0
+    y_min: -7.0
+    y_max: 7.0
+
+  wall:
+    thickness_m: 0.15
+    # Must exceed the LiDAR mount height (0.15 m) by a healthy margin, otherwise
+    # rays graze the top edge and range readings flicker between wall and void.
+    height_m: 1.20
+
+  # ---------------------------------------------------------------- walls
+  walls:
+    # --- outer boundary ---
+    - { name: "outer_south", segment: [-10.0, -7.0,  10.0, -7.0] }
+    - { name: "outer_north", segment: [-10.0,  7.0,  10.0,  7.0] }
+    - { name: "outer_west",  segment: [-10.0, -7.0, -10.0,  7.0] }
+    - { name: "outer_east",  segment: [ 10.0, -7.0,  10.0,  7.0] }
+
+    # --- corridor, running east-west through the middle, 3.0 m wide ---
+    # North side, with three doorways (gaps) into the north rooms.
+    - { name: "corr_n_1", segment: [-10.0,  1.5,  -8.0,  1.5] }
+    - { name: "corr_n_2", segment: [ -6.5,  1.5,  -1.0,  1.5] }
+    - { name: "corr_n_3", segment: [  0.5,  1.5,   5.0,  1.5] }
+    - { name: "corr_n_4", segment: [  6.5,  1.5,  10.0,  1.5] }
+    # South side, with two doorways.
+    - { name: "corr_s_1", segment: [-10.0, -1.5,  -6.0, -1.5] }
+    - { name: "corr_s_2", segment: [ -4.5, -1.5,   2.0, -1.5] }
+    - { name: "corr_s_3", segment: [  3.5, -1.5,  10.0, -1.5] }
+
+    # --- north wing room dividers ---
+    - { name: "div_n_a", segment: [ -3.0,  1.5,  -3.0,  7.0] }   # Room A | B
+    - { name: "div_n_b", segment: [  3.0,  1.5,   3.0,  7.0] }   # Room B | C
+    # A short stub inside Room A creates a dead-end alcove: a place where a
+    # greedy local planner gets trapped and the global plan must rescue it.
+    - { name: "alcove_a", segment: [ -6.5,  4.0,  -3.0,  4.0] }
+
+    # --- south wing room divider ---
+    - { name: "div_s_a", segment: [  1.0, -7.0,   1.0, -1.5] }   # Room D | E
+    # A narrow gap (0.9 m) -- wide enough for the 0.385 m-wide robot, tight
+    # enough that the inflation radius matters in Phase 7.
+    - { name: "pinch_s", segment: [ -5.0, -7.0,  -5.0, -4.2] }
+
+  # ------------------------------------------------------------- obstacles
+  # Free-standing objects the LiDAR sees but which are NOT part of the wall
+  # structure. Cylinders are deliberately included: a round obstacle produces a
+  # curved return that stresses the occupancy-grid ray casting far more than an
+  # axis-aligned box does.
+  obstacles:
+    - { name: "pillar_corr_1", type: "cylinder", pose: [-7.0,  0.0], radius: 0.25, height: 1.20 }
+    - { name: "pillar_corr_2", type: "cylinder", pose: [ 4.0,  0.6], radius: 0.25, height: 1.20 }
+    - { name: "crate_a_1",     type: "box",      pose: [-8.0,  5.5], size: [0.60, 0.60, 0.60], yaw: 0.0 }
+    - { name: "crate_a_2",     type: "box",      pose: [-5.0,  2.6], size: [0.80, 0.40, 0.70], yaw: 0.6 }
+    - { name: "crate_b_1",     type: "box",      pose: [ 0.0,  4.5], size: [1.20, 0.50, 0.80], yaw: 0.0 }
+    - { name: "drum_c_1",      type: "cylinder", pose: [ 6.0,  3.0], radius: 0.30, height: 0.90 }
+    - { name: "drum_c_2",      type: "cylinder", pose: [ 8.2,  5.2], radius: 0.30, height: 0.90 }
+    - { name: "crate_d_1",     type: "box",      pose: [-7.5, -4.0], size: [0.70, 0.70, 0.70], yaw: 0.3 }
+    - { name: "crate_d_2",     type: "box",      pose: [-2.0, -5.0], size: [1.00, 0.60, 0.50], yaw: -0.4 }
+    - { name: "drum_e_1",      type: "cylinder", pose: [ 5.0, -4.5], radius: 0.28, height: 1.00 }
+    - { name: "crate_e_1",     type: "box",      pose: [ 7.5, -2.8], size: [0.60, 1.40, 0.75], yaw: 0.0 }
+
+  # -------------------------------------------------------------- waypoints
+  # Named poses used by launch files and by the Phase 11 experiment sweeps, so
+  # that "start" and "goal" are never magic numbers in a launch argument.
+  poses:
+    spawn:        { x: -8.5, y:  0.0, yaw: 0.0 }
+    goal_room_c:  { x:  7.0, y:  5.0, yaw: 0.0 }
+    goal_room_e:  { x:  6.0, y: -5.5, yaw: 0.0 }
+    goal_alcove:  { x: -8.5, y:  5.5, yaw: 0.0 }
+    goal_far_east: { x:  8.5, y:  0.0, yaw: 0.0 }

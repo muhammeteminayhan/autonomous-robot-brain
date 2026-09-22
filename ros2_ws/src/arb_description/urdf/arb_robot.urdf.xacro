@@ -1,0 +1,207 @@
+<?xml version="1.0"?>
+<!--
+  Differential-drive mobile robot for the Autonomous Robot Brain stack.
+
+  All dimensions are READ FROM configs/robot.yaml at parse time rather than
+  written here. That file is the single source of truth: if the wheel radius in
+  the simulated model and the one used by the odometry equations ever disagree,
+  the result is a constant scale error on every distance the robot believes it
+  travelled — which looks exactly like sensor drift and is extremely expensive
+  to diagnose from a trajectory plot.
+
+  Link tree:
+
+      base_link                 (ROOT; chassis centre)
+        ├── base_footprint      (fixed, on the ground at z = 0)
+        ├── left_wheel_link     (continuous joint about Y)
+        ├── right_wheel_link    (continuous joint about Y)
+        ├── front_caster_link   (fixed, frictionless sphere)
+        ├── rear_caster_link    (fixed, frictionless sphere)
+        ├── imu_link            (fixed)
+        └── lidar_link          (fixed)
+
+  WHY base_link IS THE ROOT, NOT base_footprint
+  =============================================
+  Many tutorials root the tree at base_footprint. That breaks here, and the way
+  it breaks is silent.
+
+  When Gazebo converts URDF to SDF it performs "fixed joint lumping": a link
+  joined to its parent by a FIXED joint is merged into that parent, and only the
+  parent survives as an SDF link. Poses are preserved, so the physics is
+  correct, but the child link NAME disappears from the model.
+
+  With base_footprint as the root, base_link is lumped away. Every gz system
+  configured with <robot_base_frame>base_link</robot_base_frame> — notably the
+  OdometryPublisher that produces our ground truth — then fails to resolve its
+  frame and simply publishes nothing. No error, no warning: the topic is just
+  never created, and you discover it when the Phase 5 evaluation has no
+  reference trajectory to compare against.
+
+  Rooting at base_link inverts the merge: base_footprint is absorbed instead,
+  and base_link survives. This also matches REP-105, which names base_link as
+  the robot frame; base_footprint is a convenience extension, and tf2 inverts
+  the transform for free when a consumer wants it.
+
+  tests/test_urdf_model.py asserts that base_link is still present after the
+  SDF conversion, so this cannot silently regress.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="arb_diffdrive">
+
+  <!-- ==================== configuration ==================== -->
+  <xacro:arg name="robot_config"   default="$(find arb_description)/config/robot.yaml"/>
+  <xacro:arg name="sensor_config"  default="$(find arb_description)/config/sensors.yaml"/>
+  <!-- Gazebo-specific blocks are skipped when the model is only being inspected
+       in RViz or validated with check_urdf. -->
+  <xacro:arg name="use_gazebo"     default="true"/>
+
+  <xacro:property name="cfg"  value="${xacro.load_yaml('$(arg robot_config)')['robot']}"/>
+  <xacro:property name="scfg" value="${xacro.load_yaml('$(arg sensor_config)')}"/>
+
+  <xacro:property name="chassis" value="${cfg['chassis']}"/>
+  <xacro:property name="drive"   value="${cfg['drive']}"/>
+  <xacro:property name="casters" value="${cfg['casters']}"/>
+  <xacro:property name="frames"  value="${cfg['frames']}"/>
+  <xacro:property name="mounts"  value="${cfg['sensor_mounts']}"/>
+
+  <!-- Derived once, used everywhere. base_link sits at the chassis centre, so
+       its height above ground is clearance + half the chassis height. -->
+  <xacro:property name="base_z"     value="${chassis['ground_clearance_m'] + chassis['height_m'] / 2.0}"/>
+  <xacro:property name="wheel_r"    value="${drive['wheel_radius_m']}"/>
+  <xacro:property name="wheel_w"    value="${drive['wheel_width_m']}"/>
+  <!-- Wheel centre is one radius above the ground, expressed relative to base_link. -->
+  <xacro:property name="wheel_z"    value="${wheel_r - base_z}"/>
+  <xacro:property name="wheel_y"    value="${drive['wheel_separation_m'] / 2.0}"/>
+  <xacro:property name="caster_r"   value="${casters['radius_m']}"/>
+  <xacro:property name="caster_z"   value="${caster_r - base_z}"/>
+
+  <xacro:include filename="$(find arb_description)/urdf/inertia_macros.xacro"/>
+
+  <!-- ==================== materials ==================== -->
+  <material name="chassis_grey"><color rgba="0.25 0.28 0.32 1.0"/></material>
+  <material name="wheel_black"> <color rgba="0.08 0.08 0.09 1.0"/></material>
+  <material name="caster_grey"> <color rgba="0.55 0.55 0.58 1.0"/></material>
+  <material name="imu_green">   <color rgba="0.20 0.70 0.35 1.0"/></material>
+  <material name="lidar_red">   <color rgba="0.80 0.20 0.20 1.0"/></material>
+
+  <!-- ==================== chassis (root link) ==================== -->
+  <link name="${frames['base_link']}">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${chassis['length_m']} ${chassis['width_m']} ${chassis['height_m']}"/>
+      </geometry>
+      <material name="chassis_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${chassis['length_m']} ${chassis['width_m']} ${chassis['height_m']}"/>
+      </geometry>
+    </collision>
+    <xacro:box_inertia m="${chassis['mass_kg']}"
+                       x="${chassis['length_m']}"
+                       y="${chassis['width_m']}"
+                       z="${chassis['height_m']}"/>
+  </link>
+
+  <!-- ==================== wheels ==================== -->
+  <!-- reflect = +1 for left, -1 for right. The joint axis is +Y for BOTH
+       wheels: a positive command must turn both wheels the same way in the
+       robot frame, otherwise the robot spins when told to drive straight. -->
+  <xacro:macro name="drive_wheel" params="prefix reflect">
+    <link name="${prefix}_wheel_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry><cylinder radius="${wheel_r}" length="${wheel_w}"/></geometry>
+        <material name="wheel_black"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry><cylinder radius="${wheel_r}" length="${wheel_w}"/></geometry>
+      </collision>
+      <xacro:cylinder_inertia_y m="${drive['wheel_mass_kg']}" r="${wheel_r}" h="${wheel_w}"/>
+    </link>
+
+    <joint name="${prefix}_wheel_joint" type="continuous">
+      <parent link="${frames['base_link']}"/>
+      <child  link="${prefix}_wheel_link"/>
+      <origin xyz="0 ${reflect * wheel_y} ${wheel_z}" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <!-- Joint damping models bearing friction. Without any damping the wheel
+           is a free flywheel and keeps spinning after the command stops. -->
+      <dynamics damping="0.01" friction="0.001"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:drive_wheel prefix="left"  reflect="1"/>
+  <xacro:drive_wheel prefix="right" reflect="-1"/>
+
+  <!-- ==================== casters ==================== -->
+  <!-- One caster in front of the wheel axle and one behind it. See
+       configs/robot.yaml for why a single rear caster is not enough. -->
+  <xacro:macro name="caster" params="name x">
+    <link name="${name}_caster_link">
+      <visual>
+        <geometry><sphere radius="${caster_r}"/></geometry>
+        <material name="caster_grey"/>
+      </visual>
+      <collision>
+        <geometry><sphere radius="${caster_r}"/></geometry>
+      </collision>
+      <xacro:sphere_inertia m="0.05" r="${caster_r}"/>
+    </link>
+    <joint name="${name}_caster_joint" type="fixed">
+      <parent link="${frames['base_link']}"/>
+      <child  link="${name}_caster_link"/>
+      <origin xyz="${x} 0 ${caster_z}" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:caster name="front" x="${casters['x_offsets_m'][0]}"/>
+  <xacro:caster name="rear"  x="${casters['x_offsets_m'][1]}"/>
+
+  <!-- ==================== base_footprint ==================== -->
+  <!-- A massless frame pinned to the ground directly beneath base_link.
+       Planning and control reason about a 2D footprint, and an explicit z = 0
+       frame means no node has to subtract the chassis height by hand. -->
+  <link name="${frames['base_footprint']}">
+    <xacro:frame_inertia/>
+  </link>
+  <joint name="base_link_to_base_footprint" type="fixed">
+    <parent link="${frames['base_link']}"/>
+    <child  link="${frames['base_footprint']}"/>
+    <origin xyz="0 0 ${-base_z}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ==================== sensor frames ==================== -->
+  <link name="${frames['imu']}"><xacro:frame_inertia/></link>
+  <joint name="imu_joint" type="fixed">
+    <parent link="${frames['base_link']}"/>
+    <child  link="${frames['imu']}"/>
+    <origin xyz="${mounts['imu']['xyz_m'][0]} ${mounts['imu']['xyz_m'][1]} ${mounts['imu']['xyz_m'][2]}"
+            rpy="${mounts['imu']['rpy_rad'][0]} ${mounts['imu']['rpy_rad'][1]} ${mounts['imu']['rpy_rad'][2]}"/>
+  </joint>
+
+  <link name="${frames['lidar']}">
+    <visual>
+      <geometry><cylinder radius="0.038" length="0.040"/></geometry>
+      <material name="lidar_red"/>
+    </visual>
+    <collision>
+      <geometry><cylinder radius="0.038" length="0.040"/></geometry>
+    </collision>
+    <xacro:frame_inertia/>
+  </link>
+  <joint name="lidar_joint" type="fixed">
+    <parent link="${frames['base_link']}"/>
+    <child  link="${frames['lidar']}"/>
+    <origin xyz="${mounts['lidar']['xyz_m'][0]} ${mounts['lidar']['xyz_m'][1]} ${mounts['lidar']['xyz_m'][2]}"
+            rpy="${mounts['lidar']['rpy_rad'][0]} ${mounts['lidar']['rpy_rad'][1]} ${mounts['lidar']['rpy_rad'][2]}"/>
+  </joint>
+
+  <!-- ==================== Gazebo ==================== -->
+  <xacro:if value="$(arg use_gazebo)">
+    <xacro:include filename="$(find arb_description)/urdf/gazebo.xacro"/>
+  </xacro:if>
+
+</robot>

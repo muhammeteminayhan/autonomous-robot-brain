@@ -55,8 +55,18 @@ lidar:
 
   # 2D planar scanner, roughly RPLIDAR A2 class.
   samples: 360
+  # Gazebo computes  angle_increment = (angle_max - angle_min) / (samples - 1).
+  # Setting angle_max to exactly +pi therefore gives an increment of 2*pi/359,
+  # and beam 0 (at -pi) points in the SAME direction as beam 359 (at +pi): one
+  # measurement is wasted and the beam spacing is 1.0028 deg rather than 1 deg.
+  #
+  # Spanning one increment less closes the circle exactly: the span becomes
+  # 2*pi * 359/360, the increment becomes exactly 2*pi/360 = 1 deg, and the 360
+  # beams are distinct and evenly spaced. Downstream code that indexes beams by
+  # angle (occupancy-grid ray casting, scan matching) then has no accumulating
+  # angular bias.
   angle_min_rad: -3.14159265358979
-  angle_max_rad: 3.14159265358979
+  angle_max_rad: 3.12413936106985   # = pi - 2*pi/360
   range_min_m: 0.12
   range_max_m: 12.0
   range_noise_sigma_m: 0.015

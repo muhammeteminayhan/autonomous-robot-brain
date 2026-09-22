@@ -5,10 +5,12 @@ Gazebo estimates its own pose from noisy IMU, wheel-encoder and 2D LiDAR data,
 maps its surroundings, plans a collision-free route to a goal, and keeps doing
 so while its sensors are deliberately degraded and failed.
 
-> **Project status: Phase 0 of 12 complete and verified.**
-> The workspace builds clean (11/11 packages) and all 20 unit tests plus the
-> architecture guards pass on ROS 2 Jazzy / Gazebo Harmonic / Ubuntu 24.04.
-> Simulation (Phase 1) is next. See
+> **Project status: Phases 0-1 of 12 complete and verified.**
+> The robot drives in a Gazebo Harmonic world with working IMU, wheel encoders
+> and 2D LiDAR. A scan-versus-floor-plan residual analysis puts the end-to-end
+> geometric error at 0.0149 m standard deviation against a configured sensor
+> noise of 0.015 m, i.e. the pipeline adds no measurable error of its own.
+> Sensor preprocessing (Phase 2) is next. See
 > [Verification status](#verification-status) for exactly what has been run.
 
 ---
@@ -155,8 +157,90 @@ pytest tests/integration -v # architecture guards
 
 ## Usage
 
-> Runtime entry points arrive in Phase 1 (simulation) and Phase 4 (full stack).
-> This section will be filled in with verified commands as each phase lands.
+```bash
+source /opt/ros/jazzy/setup.bash
+source ros2_ws/install/setup.bash
+
+# Simulation with GUI and RViz
+ros2 launch arb_simulation simulation.launch.py
+
+# Headless, for batch experiments
+ros2 launch arb_simulation simulation.launch.py headless:=true rviz:=false
+
+# Spawn somewhere else (names come from configs/world.yaml)
+ros2 launch arb_simulation simulation.launch.py spawn:=goal_room_c
+```
+
+Drive it by hand:
+
+```bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
+```
+
+Verify the simulation is actually producing usable data (rates, frame ids,
+noise, beam geometry, and an open-loop motion check):
+
+```bash
+python3 scripts/verify_simulation.py
+```
+
+Overlay a live scan on the known floor plan:
+
+```bash
+python3 scripts/plot_scan_vs_world.py -o results/phase1/scan_vs_world.png
+```
+
+Regenerate the world after editing `configs/world.yaml`:
+
+```bash
+python3 scripts/generate_world.py
+```
+
+### Simulation
+
+![LiDAR scan overlaid on the generated floor plan](results/phase1/scan_vs_world.png)
+
+A live 360-beam LiDAR scan (red) plotted over the floor plan the world was
+generated from. Every beam is placed using the sensor extrinsics from
+`configs/robot.yaml` and the robot's ground-truth pose. Agreement between the
+red points and the black walls exercises the whole chain at once: world
+generation, physics, GPU LiDAR, beam indexing, sensor mounting and the
+`ros_gz` bridge.
+
+Measured residual of each beam endpoint to the nearest modelled surface:
+
+| Statistic | Value |
+|---|---|
+| Mean | -0.0007 m |
+| Median | -0.0006 m |
+| Standard deviation | **0.0149 m** |
+| Configured LiDAR noise sigma | **0.015 m** |
+| Beams within 5 cm of a surface | 99.7 % |
+| Beams used | 360 / 360 |
+
+The residual spread equals the configured measurement noise, so the geometric
+pipeline contributes no bias and no additional error.
+
+### Topic graph
+
+```
+            gz sim (physics + sensors)
+                      |  gz-transport, NOT DDS
+              ros_gz_bridge   <- config: arb_simulation/config/ros_gz_bridge.yaml
+                      |  ROS 2 DDS
+  /clock      /imu/data_raw     /joint_states      /scan_raw
+  1000 Hz        200 Hz             50 Hz            10 Hz
+
+  /arb/ground_truth/odom  100 Hz   <- EVALUATION ONLY
+
+  /cmd_vel  --(ROS to GZ)-->  DiffDrive plugin  -->  wheel torques
+  /robot_description  -->  robot_state_publisher  -->  /tf, /tf_static
+```
+
+Gazebo and ROS 2 run on separate middlewares. A sensor that is configured
+perfectly in the URDF but absent from the bridge config publishes happily
+inside Gazebo and is completely invisible to ROS, which looks identical to a
+broken sensor.
 
 ---
 
@@ -206,15 +290,21 @@ to work until it has been executed.
 
 | Item | Status | Evidence |
 |---|---|---|
-| Environment (ROS 2 Jazzy, Gazebo Sim 8.15.0, g++ 13.3, CMake 3.28, Eigen 3.4) | ✅ verified | `./scripts/check_environment.sh` → *Environment OK (0 warnings)* |
-| `colcon build` | ✅ verified | 11/11 packages finished, zero stderr |
-| `arb_core` gtest suite | ✅ verified | 17 tests, 0 failures |
-| `arb_evaluation` lint (flake8 + pep257) | ✅ verified | 2 tests, 0 failures |
-| **Total unit tests** | ✅ verified | **20 tests, 0 errors, 0 failures** |
+| Environment (ROS 2 Jazzy, Gazebo Sim 8.15.0, g++ 13.3, CMake 3.28, Eigen 3.4) | ✅ verified | `./scripts/check_environment.sh` → *Environment OK* |
+| `colcon build` | ✅ verified | 11/11 packages, zero stderr |
+| Unit tests (`colcon test`) | ✅ verified | **20 tests, 0 failures** |
+| Integration tests (`pytest tests/integration`) | ✅ verified | **57 passed, 1 skipped** |
 | Ground-truth isolation guard | ✅ verified | passes, and **fails correctly** when a violation is injected |
-| `package.xml` / `.msg` / YAML well-formedness | ✅ verified | static parse of all 11 packages |
-| Gazebo simulation runs | ❌ not implemented | Phase 1 |
-| EKF, mapping, planning, control | ❌ not implemented | Phases 4–9 |
+| URDF matches `configs/robot.yaml` | ✅ verified | every dimension compared in `test_urdf_model.py` |
+| `base_link` survives URDF→SDF lumping | ✅ verified | `test_sdf_conversion_keeps_base_link` |
+| Gazebo world loads | ✅ verified | `gz sdf -k arb_indoor.sdf` → *Valid* |
+| Robot spawns and drives | ✅ verified | `verify_simulation.py` → all checks pass |
+| Sensor rates (IMU 200 / encoders 50 / LiDAR 10 / truth 100 Hz) | ✅ verified | measured 200.00 / 50.00 / 10.00 / 100.00 Hz |
+| Robot rests level | ✅ verified | `gz model -p` → pitch 0.000000 rad, z 0.100000 m |
+| Wheel arc equals distance travelled | ✅ verified | 0.648 m vs 0.648 m, 0.0 % disagreement |
+| Scan matches floor plan | ✅ verified | residual sigma 0.0149 m vs 0.015 m configured noise |
+| Sensor preprocessing / fault injection | ❌ not implemented | Phase 2, 10 |
+| Odometry, EKF, mapping, planning, control | ❌ not implemented | Phases 3-9 |
 
 
 ---
@@ -227,6 +317,9 @@ to work until it has been executed.
 - The Gazebo sensor models are idealised approximations of real hardware;
   absolute error figures are meaningful *relative to each other*, not as
   predictions of real-world performance.
+- On this hybrid Intel/NVIDIA machine Gazebo logs `libEGL warning: egl: failed
+  to create dri2 screen` at startup. The GPU LiDAR still produces correct data
+  at the full 10 Hz (verified), but rendering falls back to a slower path.
 
 ---
 

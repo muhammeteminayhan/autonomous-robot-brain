@@ -22,7 +22,13 @@ robot:
   drive:
     # Distance between the two driven wheel contact points. Appears as `L` in
     # the inverse kinematics  omega = (v_r - v_l) / L.
-    wheel_separation_m: 0.320
+    #
+    # Lower bound is set by geometry, not by preference: the wheel must clear the
+    # chassis side. chassis_width/2 + wheel_width/2 = 0.150 + 0.0175 = 0.1675 m,
+    # so the separation must exceed 0.335 m. 0.350 m leaves a 7.5 mm air gap.
+    # Overlapping collision shapes make the physics solver resolve a permanent
+    # penetration every step, which shows up as a robot that jitters in place.
+    wheel_separation_m: 0.350
     wheel_radius_m: 0.060
     wheel_width_m: 0.035
     wheel_mass_kg: 0.5
@@ -36,11 +42,29 @@ robot:
     max_linear_acceleration_m_s2: 1.00
     max_angular_acceleration_rad_s2: 3.00
 
-  caster:
-    # A passive spherical caster keeps the chassis statically stable without
-    # adding a third controlled degree of freedom.
-    radius_m: 0.035
-    x_offset_m: -0.150
+  casters:
+    # Passive spherical casters keep the chassis statically stable without
+    # adding controlled degrees of freedom.
+    #
+    # TWO casters, front AND rear. A single rear caster is the textbook picture
+    # and it does not work here: the drive wheels are at x = 0 and the chassis
+    # centre of mass is also at x = 0, so the contact polygon is
+    # {left wheel, right wheel, rear caster} with the centre of mass exactly ON
+    # its front edge. Nothing resists a nose-down moment. The robot pitches
+    # forward onto the front edge of its chassis and stays there.
+    #
+    # Measured before the fix: a steady pitch of 0.2035 rad (11.7 deg), which is
+    # atan(ground_clearance / (chassis_length/2)) plus tyre compression. The
+    # visible symptom was not a tipped robot -- it was a LiDAR that reported
+    # phantom obstacles at ~1.04 m in open corridor, because a scanner pitched
+    # 11.7 deg down at 0.25 m height strikes the floor at 0.25/sin(11.7 deg).
+    # Sensor data looked broken; the model was.
+    #
+    # radius = ground_clearance / 2, so each sphere spans z in [0, 0.040] and
+    # its top just touches the chassis underside. A larger ball would intersect
+    # the chassis; a smaller one would need a stem link to reach the ground.
+    radius_m: 0.020
+    x_offsets_m: [0.150, -0.150]
 
   frames:
     # REP-105 frame convention. map -> odom -> base_link is the canonical chain.
