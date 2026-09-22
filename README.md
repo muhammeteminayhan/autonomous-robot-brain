@@ -5,14 +5,12 @@ Gazebo estimates its own pose from noisy IMU, wheel-encoder and 2D LiDAR data,
 maps its surroundings, plans a collision-free route to a goal, and keeps doing
 so while its sensors are deliberately degraded and failed.
 
-> **Project status: Phases 0-3 of 12 complete and verified.**
-> The robot drives in a Gazebo Harmonic world with a working IMU, wheel
-> encoders and 2D LiDAR behind a preprocessing layer that models quantisation,
-> Gauss-Markov bias, slip and beam dropout and accepts fault injection at
-> runtime. Wheel odometry integrates the encoders exactly on SE(2) and, after
-> calibrating the effective track width, drifts **0.94 % of distance
-> travelled** over a 10 m route. 107 unit tests and 90 integration tests pass.
-> The EKF (Phase 4) is next. See
+> **Project status: Phases 0-5 of 12 complete and verified.**
+> A six-state EKF fuses wheel odometry with the IMU gyroscope, estimating the
+> gyro bias online. Measured against ground truth over a 10 m route it cuts
+> position RMSE by **68 %** and heading RMSE by **61 %** against wheel odometry
+> alone, ending 0.13 % of distance travelled from the true pose.
+> 133 unit tests and 90 integration tests pass. Mapping (Phase 6) is next. See
 > [Verification status](#verification-status) for exactly what has been run.
 
 ---
@@ -227,6 +225,18 @@ python3 scripts/evaluate_odometry.py
 python3 scripts/calibrate_odometry.py
 ```
 
+Compare every estimator against ground truth and write the Phase 5 plots:
+
+```bash
+python3 scripts/evaluate_localization.py --tag nominal
+```
+
+Run the odometry alone, as the baseline the filter is measured against:
+
+```bash
+ros2 launch arb_localization odometry.launch.py ekf:=false
+```
+
 Regenerate the world after editing `configs/world.yaml`:
 
 ```bash
@@ -318,6 +328,39 @@ inner edges, to within a millimetre.
 The heading error is a staircase: it steps at every turn and is flat on every
 straight. That residual is what Phase 4 exists to bound.
 
+### State estimation
+
+A six-state EKF, `[x, y, theta, v, omega, b_gyro]`, fusing the wheel odometry
+twist with the IMU gyroscope.
+
+`v` and `omega` are **states rather than control inputs** because two
+independent sensors measure them, and that is what lets the filter fuse both
+opinions. `b_gyro` is observable for the same reason: the encoders measure
+`omega` independently, so the persistent gap between gyro and encoders *is* the
+bias. `v_y` is deliberately absent — a differential drive cannot translate
+sideways, and an unobservable state is not free.
+
+Measured over 10.03 m, two laps of a rectangle:
+
+| Metric | Wheel odometry | EKF | Change |
+|---|---|---|---|
+| Position RMSE | 0.0486 m | **0.0155 m** | **−68.0 %** |
+| Final position error | 0.0946 m (0.94 %) | **0.0134 m (0.13 %)** | −86 % |
+| Heading RMSE | 3.631° | **1.432°** | **−60.6 %** |
+| Final heading error | +6.626° | **+0.977°** | −85 % |
+| Samples inside reported 2σ | 100 % | 100 % | — |
+
+Estimation latency: median 55 ms — the cost of the timestamp-ordered
+measurement buffer that lets a 200 Hz IMU and a 50 Hz encoder stream be fused
+in order.
+
+![Covariance evolution](results/phase5/5_covariance_nominal.png)
+
+The odometry's error and its claimed uncertainty both grow without bound; the
+EKF's error stays flat. The gyro bounds the *rate* at which heading uncertainty
+accumulates, not the position error itself — that needs an absolute measurement,
+which arrives in Phase 6 when there is a map to match scans against.
+
 ### Topic graph
 
 ```
@@ -341,6 +384,10 @@ straight. That residual is what Phase 4 exists to bound.
                             arb_localization
   /arb/wheel_states  -->  wheel_odometry  -->  /arb/odom           50 Hz
                                           -->  TF odom->base_link
+
+  /arb/odom  +  /arb/imu  -->  ekf  -->  /arb/pose            50 Hz
+                                    -->  /ekf/diagnostics     50 Hz
+                                    -->  TF map->odom
 ```
 
 Gazebo and ROS 2 run on separate middlewares. A sensor that is configured
@@ -398,24 +445,28 @@ to work until it has been executed.
 |---|---|---|
 | Environment (ROS 2 Jazzy, Gazebo Sim 8.15.0, g++ 13.3, CMake 3.28, Eigen 3.4) | ✅ verified | `./scripts/check_environment.sh` → *Environment OK* |
 | `colcon build` | ✅ verified | 11/11 packages, zero stderr |
-| Unit tests (`colcon test`) | ✅ verified | **107 tests, 0 failures** |
+| Unit tests (`colcon test`) | ✅ verified | **133 tests, 0 failures** |
 | Integration tests (`pytest tests/integration`) | ✅ verified | **90 passed, 1 skipped** |
-| Unit tests are not vacuous | ✅ verified | 13 deliberate mutations injected across two packages; all caught (5 escaped first and the tests were strengthened) |
+| Unit tests are not vacuous | ✅ verified | 23 deliberate mutations injected across three packages; all caught (6 escaped first and the tests were strengthened) |
 | Ground-truth isolation guard | ✅ verified | passes, and fails correctly when a violation is injected |
 | URDF matches `configs/robot.yaml` | ✅ verified | every dimension compared in `test_urdf_model.py` |
 | Node params match the repo config | ✅ verified | `test_config_consistency.py` (caught one real drift) |
 | Robot spawns, drives, rests level | ✅ verified | pitch 0.000000 rad, z 0.100000 m |
 | Scan matches floor plan | ✅ verified | residual sigma 0.0149 m vs 0.015 m configured noise |
 | Preprocessed stream rates | ✅ verified | 200.00 / 50.00 / 10.00 Hz measured |
-| IMU covariance equals the datasheet sigma | ✅ verified | 0.004950 rad/s published, 0.005019 measured |
-| Encoder positions lie on the count grid | ✅ verified | 0 of 600 samples off the 1.534 mrad grid |
 | Runtime fault injection changes the data | ✅ verified | `noise_scale=10` → 9.7x spread, covariance 100x |
-| Commanded dropout is not amplified | ✅ verified | 60 % commanded → 39.2 % of beams survived |
 | Odometry integrates a circle exactly | ✅ verified | full circle closes to 1e-9 m, independent of step size |
-| Odometry Jacobians match finite differences | ✅ verified | central differences, 1e-5 tolerance |
-| Odometry drift | ✅ measured | **0.094 m over 10.04 m = 0.94 % of distance**, heading 6.96° |
+| Odometry + EKF Jacobians match finite differences | ✅ verified | central differences, 1e-5 tolerance |
 | Track width calibration | ✅ verified | 0.3500 → 0.3154 m, direction asymmetry 0.00 % |
-| EKF, mapping, planning, control | ❌ not implemented | Phases 4-9 |
+| Odometry drift | ✅ measured | 0.0946 m over 10.03 m = **0.94 %** of distance |
+| EKF drift | ✅ measured | 0.0134 m over 10.03 m = **0.13 %** of distance |
+| EKF improves on odometry | ✅ measured | position RMSE **−68.0 %**, heading RMSE **−60.6 %** |
+| EKF covariance is consistent | ✅ verified | 100 % of samples inside the reported 2σ; average NIS 2.0 ± 0.15 against 2 dof |
+| Gyro bias is observable and estimated | ✅ verified | converges to a 0.03 rad/s injected bias within 0.004 |
+| Both sensor streams are actually fused | ✅ verified | 467/470 odometry and 1833/1845 IMU measurements fused, 0 out of order |
+| Estimation latency | ✅ measured | median 55 ms, p95 60 ms, max 70 ms |
+| LiDAR absolute correction | ❌ not implemented | Phase 6 — there is no map to match against yet |
+| Mapping, planning, control | ❌ not implemented | Phases 6-9 |
 | Fault scenario timeline (Cases A-F) | ❌ not implemented | Phase 10 — the runtime knobs exist, the scheduler does not |
 
 

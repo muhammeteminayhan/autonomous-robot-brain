@@ -25,6 +25,7 @@ find_package(tf2_geometry_msgs REQUIRED)
 # a node, an executor or a graph.
 add_library(${PROJECT_NAME}_core SHARED
   src/differential_drive_odometry.cpp
+  src/ekf.cpp
 )
 target_include_directories(${PROJECT_NAME}_core PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
@@ -35,7 +36,14 @@ add_executable(wheel_odometry_node src/wheel_odometry_node.cpp)
 target_link_libraries(wheel_odometry_node ${PROJECT_NAME}_core)
 ament_target_dependencies(wheel_odometry_node
   rclcpp sensor_msgs geometry_msgs nav_msgs arb_core tf2 tf2_ros tf2_geometry_msgs)
-install(TARGETS wheel_odometry_node DESTINATION lib/${PROJECT_NAME})
+
+add_executable(ekf_node src/ekf_node.cpp)
+target_link_libraries(ekf_node ${PROJECT_NAME}_core)
+ament_target_dependencies(ekf_node
+  rclcpp sensor_msgs geometry_msgs nav_msgs arb_msgs arb_core
+  tf2 tf2_ros tf2_geometry_msgs)
+
+install(TARGETS wheel_odometry_node ekf_node DESTINATION lib/${PROJECT_NAME})
 
 install(TARGETS ${PROJECT_NAME}_core
   EXPORT export_${PROJECT_NAME}
@@ -54,6 +62,9 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_odometry test/test_odometry.cpp)
   target_link_libraries(test_odometry ${PROJECT_NAME}_core)
+
+  ament_add_gtest(test_ekf test/test_ekf.cpp)
+  target_link_libraries(test_ekf ${PROJECT_NAME}_core)
 endif()
 
 ament_export_include_directories(include)

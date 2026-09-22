@@ -99,3 +99,108 @@
 
     left_joint: "left_wheel_joint"
     right_joint: "right_wheel_joint"
+
+/**/ekf:
+  ros__parameters:
+    odom_topic: "/arb/odom"
+    imu_topic: "/arb/imu"
+    pose_topic: "/arb/pose"
+    diagnostics_topic: "/ekf/diagnostics"
+
+    # --- frames (REP-105) ---
+    # The EKF owns map -> odom. The odometry node owns odom -> base_link. A
+    # frame may have only one parent, so the filter publishes the CORRECTION
+    #   T_map_odom = T_map_base * T_odom_base^-1
+    # leaving odom -> base_link smooth for the controller while map -> base_link
+    # stays globally consistent for the planner.
+    map_frame: "map"
+    odom_frame: "odom"
+    base_frame: "base_link"
+    publish_tf: true
+    publish_rate_hz: 50.0
+
+    use_imu: true
+
+    # --- process noise ---
+    # These are the 1-sigma of the DRIVING DISTURBANCE, not of the state, and
+    # they enter as variance * dt (a random walk), so the meaning is concrete:
+    # after one second with no measurement, the velocity is uncertain by
+    # accel_sigma metres per second.
+    #
+    # The constant-velocity model does not claim the robot never accelerates.
+    # It says the filter does not know the commanded acceleration, and these
+    # numbers declare how much to allow for. The platform's limits are
+    # 1.0 m/s^2 and 3.0 rad/s^2 (configs/robot.yaml), so allowing roughly that
+    # much keeps the filter able to follow a real manoeuvre without being so
+    # loose it stops believing the encoders.
+    #
+    # Too SMALL is the dangerous direction: a filter that does not allow for
+    # the acceleration its own robot can produce sees every real deceleration
+    # as an outlier, the chi-square gate rejects it, and the estimate keeps
+    # coasting. Measured during development: the filter held v = 0.08 m/s while
+    # the robot pivoted in place and the odometry read 0.0001 m/s, tracing a
+    # half-metre loop at every corner of the evaluation route.
+    process:
+      accel_sigma: 0.8              # m/s^2
+      angular_accel_sigma: 2.0      # rad/s^2
+      # Matches configs/sensors.yaml imu.gyroscope.bias_random_walk_rad_s2.
+      gyro_bias_random_walk: 2.0e-5
+      # Direct pose disturbance: wheel slip, an uneven floor, a bumped robot.
+      # Without it a stationary robot's covariance freezes and the filter stops
+      # accepting corrections.
+      position_sigma: 0.002         # m per sqrt(s)
+      heading_sigma: 0.002          # rad per sqrt(s)
+
+    # --- innovation gating ---
+    # Chi-square 99 % quantiles. A measurement whose normalised innovation
+    # squared exceeds its threshold is rejected outright.
+    #
+    # This is the filter's immune system: an EKF has no other defence against a
+    # wrong measurement, and once a bad correction has moved the estimate the
+    # next measurement looks even more wrong.
+    gating:
+      enabled: true
+      nis_1dof: 6.63
+      nis_2dof: 9.21
+      nis_3dof: 11.34
+      # A gate that never yields is a trap: a genuinely lost filter finds every
+      # correct measurement implausible and rejects it forever. Forcing it open
+      # after a long run of rejections lets the filter recover.
+      max_consecutive_rejections: 25
+
+    # --- initialisation ---
+    # The filter starts FROM the first odometry message, not from zero.
+    # Starting far from the truth behind a chi-square gate lets the filter lock
+    # into a wrong but self-consistent state: measured during development, a
+    # 0.1 rad/s bias prior let the gyro's reading be explained entirely by bias,
+    # the bias settled at 0.475 rad/s, and every later encoder reading looked
+    # like an outlier.
+    initial:
+      pose_sigma: 0.05              # m and rad
+      twist_sigma: 0.10             # m/s and rad/s
+      # 0.01 rad/s is already 50x the datasheet bias stability (0.0002 rad/s).
+      # Generous, but not so large that it can absorb a real rotation.
+      gyro_bias_sigma: 0.01
+
+    # A sensor reporting zero uncertainty would receive infinite weight and
+    # overwrite the state. That is what a misconfigured upstream node looks
+    # like, so the reported sigma is floored.
+    min_measurement_sigma: 1.0e-4
+    max_predict_dt: 0.5
+
+    # --- measurement buffering ---
+    # The IMU arrives at 200 Hz and the odometry at 50 Hz, so whichever
+    # callback fires advances the filter clock past the other sensor's newest
+    # timestamp. Fusing on arrival therefore discarded almost every odometry
+    # message: measured 1917 IMU updates against 3 odometry updates in ten
+    # seconds, with 485 out-of-order rejections. The filter was running on the
+    # gyroscope alone, which makes the gyro bias unobservable -- the very state
+    # the six-state design exists to estimate. Nothing errored.
+    #
+    # Measurements are therefore held and fused in timestamp order once
+    # everything from that instant has had time to arrive. The window must
+    # exceed the spread in arrival times (one 20 ms odometry period); 60 ms
+    # gives three periods of margin. The cost is exactly that much lag in the
+    # published estimate.
+    measurement_buffer_delay_s: 0.06
+    measurement_buffer_max: 2000

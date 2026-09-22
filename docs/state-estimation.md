@@ -1,7 +1,6 @@
 # State Estimation
 
-> Phases 3–5. Phase 3 (wheel odometry) is complete and measured; the EKF is
-> Phase 4.
+> Phases 3–5, all complete and measured.
 
 ## 1. Differential-drive kinematics
 
@@ -121,3 +120,120 @@ map --(EKF correction: slow, DISCONTINUOUS)--> odom --(odometry: fast, SMOOTH)--
 `map -> odom` correction belongs to the EKF. Writing a correction into
 `odom -> base_link` destroys the smoothness controllers depend on, and is the
 most common way to break a ROS navigation stack.
+
+
+---
+
+## 7. The Extended Kalman Filter (Phase 4)
+
+### State vector
+
+```
+x = [ x, y, theta, v, omega, b_gyro ]^T
+```
+
+| State | Why it is there |
+|---|---|
+| `x, y, theta` | the pose, which is what everything downstream wants |
+| `v, omega` | the body twist. **Two independent sensors measure these**: the encoders measure both, the gyroscope measures `omega`. Making them states is what lets the filter fuse the two opinions. Treating odometry as a control input instead throws the gyro's information away — and Phase 3 measured that the entire residual error lives in rotation. |
+| `b_gyro` | the gyroscope's slowly varying zero offset. Integrated for `t` seconds it produces `b*t` of heading error, without bound. It is **observable** here precisely because the encoders measure `omega` independently: the persistent gap between the two readings is the bias. |
+
+Deliberately absent:
+
+* **`v_y`** — a differential drive is non-holonomic and cannot translate
+  sideways, so `v_y` is identically zero. Adding it creates a state no
+  measurement constrains; the covariance grows without bound along that
+  direction and the position smears. An unobservable state is not free.
+* **accelerometer bias** — the accelerometer is not in the measurement model at
+  all. For a planar robot at walking pace the signal is buried under gravity
+  leakage from millidegree chassis tilt, and double-integrating it is strictly
+  worse than the encoders. It is published, logged, and not believed.
+
+### Measurement models
+
+| Source | `z` | `h(x)` | `R` from |
+|---|---|---|---|
+| Wheel odometry | `[v, omega]` | `[v, omega]` | the twist covariance in `nav_msgs/Odometry` |
+| IMU gyroscope | `omega_meas` | `omega + b_gyro` | `angular_velocity_covariance` |
+| Scan match (Phase 6) | `[x, y, theta]` | `[x, y, theta]` | the matcher's covariance |
+
+The gyro's `h` includes the bias. That is the whole reason the bias is
+estimable: the filter attributes the persistent gap between gyro and encoders
+to `b` rather than repeatedly dragging `omega` towards a biased reading.
+
+### Numerical choices that matter
+
+* **Joseph form** for the covariance update. `(I - K H) P (I - K H)' + K R K'`
+  is a sum of two positive semi-definite terms, so symmetry and definiteness
+  survive rounding. The textbook `(I - K H) P` is a difference of two positive
+  quantities; with a prior of `1e6` and `R = 1e-14` it produces a posterior
+  variance around `2e-10`, four orders of magnitude above `R` and of arbitrary
+  sign.
+* **Chi-square innovation gating** on the NIS. An EKF has no other defence
+  against a wrong measurement, and a bad correction makes the next measurement
+  look even more wrong. The gate is forced open after a long run of rejections,
+  because a gate that never yields traps a filter that is genuinely lost.
+* **Process noise scales as `dt`, not `dt^2`.** See below.
+
+### Two defects found by running it
+
+**Process noise scaled as `dt^2`.** A velocity driven by white acceleration is
+a random walk: its variance accumulates as `q*T`, independent of the step size.
+Writing the per-step variance as `(sigma*dt)^2` gives `sigma^2*T*dt`, which
+*shrinks* as the step shrinks — the same filter at 200 Hz comes out four times
+more confident than at 50 Hz.
+
+| | accumulated `sigma_v` over 20 ms |
+|---|---|
+| `(sigma*dt)^2`, 5 ms steps | 0.008 m/s |
+| `sigma^2*dt` (correct) | 0.113 m/s |
+
+The platform accelerates at 1.0 m/s², so `v` changes by 0.020 m/s between 50 Hz
+odometry updates. Under the wrong scaling that arrived as a 2.5-sigma
+measurement and the gate rejected it. The filter held `v = 0.08 m/s` while the
+robot pivoted in place against an odometry reading of 0.0001 m/s, tracing a
+half-metre loop at every corner. Position RMSE was 0.298 m — six times worse
+than the odometry it was supposed to improve.
+
+**Multi-rate fusion dropped almost every odometry message.** The IMU runs at
+200 Hz and the odometry at 50 Hz; whichever callback fires advances the filter
+clock past the other sensor's newest stamp. Measured: 1917 IMU updates against
+3 odometry updates in ten seconds. The filter was running on the gyroscope
+alone, which makes the gyro bias unobservable — the exact state the six-state
+design exists to estimate.
+
+The fix is a timestamp-ordered measurement buffer with a 60 ms window. A second
+defect hid behind the first: Gazebo publishes on a 1 ms physics grid, so the
+two streams share a timestamp exactly every fourth sample, and treating "not
+strictly newer" as out-of-order discarded all of those. `dt == 0` is a valid
+case that needs an update without a prediction.
+
+After both fixes: `odom 467/470 fused, imu 1833/1845 fused, out-of-order 0`.
+
+## 8. Results (Phase 5)
+
+Two laps of a 1.5 x 1.0 m rectangle, 10.03 m travelled:
+
+| Metric | Wheel odometry | EKF | Change |
+|---|---|---|---|
+| Position RMSE | 0.0486 m | **0.0155 m** | **−68.0 %** |
+| Position mean | 0.0393 m | 0.0139 m | −65 % |
+| Position max | 0.0949 m | 0.0358 m | −62 % |
+| Final position error | 0.0946 m (0.94 %) | **0.0134 m (0.13 %)** | −86 % |
+| Heading RMSE | 3.631° | **1.432°** | **−60.6 %** |
+| Heading max | 6.811° | 3.225° | −53 % |
+| Final heading error | +6.626° | **+0.977°** | −85 % |
+| Reported final 1σ (position) | 0.2436 m | 0.1175 m | — |
+| Reported final 1σ (heading) | 13.26° | 3.23° | — |
+| Samples inside reported 2σ | 100 % | 100 % | — |
+
+Estimation latency: median 55 ms, p95 60 ms, max 70 ms — the cost of the
+measurement buffer, measured rather than hidden.
+
+![Covariance evolution](../results/phase5/5_covariance_nominal.png)
+
+The odometry's error and its claimed uncertainty both grow without bound. The
+EKF's error stays flat and its uncertainty grows very slowly: the gyro bounds
+the *rate* at which heading uncertainty accumulates. It does not bound the
+position error itself, because the filter still has no absolute measurement.
+That arrives in Phase 6, when a map exists to match scans against.

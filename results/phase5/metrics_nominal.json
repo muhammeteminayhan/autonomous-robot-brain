@@ -1,0 +1,45 @@
+{
+  "tag": "nominal",
+  "estimators": {
+    "odometry": {
+      "distance_m": 10.028567234976169,
+      "duration_s": 66.61000000000001,
+      "position_rmse_m": 0.04859036895802232,
+      "position_mean_m": 0.03926523316407578,
+      "position_median_m": 0.039891034388924385,
+      "position_max_m": 0.09489730678580785,
+      "position_final_m": 0.09455729236414599,
+      "position_final_pct_of_distance": 0.9428793779670033,
+      "heading_rmse_deg": 3.6308276648152105,
+      "heading_max_deg": 6.811359187567781,
+      "heading_final_deg": 6.625646358943615,
+      "reported_final_sigma_pos_m": 0.24361147676076367,
+      "reported_final_sigma_heading_deg": 13.26249590005072,
+      "fraction_inside_2sigma_pos": 1.0,
+      "fraction_inside_2sigma_heading": 1.0
+    },
+    "ekf": {
+      "distance_m": 10.028567234976169,
+      "duration_s": 66.61000000000001,
+      "position_rmse_m": 0.015530537777829045,
+      "position_mean_m": 0.013935784164288265,
+      "position_median_m": 0.013994085332644408,
+      "position_max_m": 0.03575133762476724,
+      "position_final_m": 0.013418546499888122,
+      "position_final_pct_of_distance": 0.13380322617859985,
+      "heading_rmse_deg": 1.4315964039883913,
+      "heading_max_deg": 3.2249196995135008,
+      "heading_final_deg": 0.9766659664120578,
+      "reported_final_sigma_pos_m": 0.11748951218280303,
+      "reported_final_sigma_heading_deg": 3.2316644824274245,
+      "fraction_inside_2sigma_pos": 1.0,
+      "fraction_inside_2sigma_heading": 1.0
+    }
+  },
+  "latency_ms": {
+    "median": 55.00000000000682,
+    "mean": 56.32352941176599,
+    "p95": 60.000000000002274,
+    "max": 70.00000000000028
+  }
+}
