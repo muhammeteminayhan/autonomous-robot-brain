@@ -1,0 +1,108 @@
+# =============================================================================
+# ROS parameters for the sensor preprocessing nodes.
+#
+# The NOMINAL specification here mirrors configs/sensors.yaml (the repo-level
+# source of truth read by the URDF and the analysis tools). The values are
+# repeated rather than symlinked because ROS parameter files must be flat,
+# per-node documents that `launch_ros` can load directly; a test in
+# tests/integration asserts the two stay in agreement so the duplication cannot
+# drift silently.
+#
+# Everything under `fault.` is a RUNTIME knob, changeable with `ros2 param set`
+# while the stack is running. Phase 10 drives these from a scenario timeline.
+# =============================================================================
+
+/**/imu_preprocessor:
+  ros__parameters:
+    rate_hz: 200.0
+    input_topic: "/imu/data_raw"
+    output_topic: "/arb/imu"
+
+    gyro:
+      noise_density: 0.00035          # rad/s/sqrt(Hz), converted to sigma by the node
+      bias_stability: 0.00020         # rad/s
+      bias_correlation_time_s: 300.0
+      bias_random_walk: 0.00002       # rad/s^2
+      scale_error: 0.002
+
+    accel:
+      noise_density: 0.0035           # m/s^2/sqrt(Hz)
+      bias_stability: 0.0050          # m/s^2
+      bias_correlation_time_s: 300.0
+      bias_random_walk: 0.0004        # m/s^3
+      scale_error: 0.003
+
+    # Gazebo applies the datasheet IMU noise inside the sensor model, so this
+    # stage adds only what a fault asks for beyond it. See
+    # ChannelNoise::added_sigma: independent variances add, so injecting a full
+    # sigma on top of an already-noisy input would make the stream 41 % noisier
+    # than the part being simulated and every published covariance wrong by the
+    # same factor.
+    input_carries_nominal_noise: true
+
+    # 200 samples at 200 Hz is one second of standing still. The robot is
+    # stationary at spawn, so this is free; on real hardware it is the reason
+    # you are told not to move the robot while it boots.
+    calibration_samples: 200
+    max_dt_s: 0.5
+    seed: 1
+
+    fault:
+      noise_scale: 1.0
+      gyro_bias_offset: 0.0
+      outage: false
+
+/**/encoder_preprocessor:
+  ros__parameters:
+    rate_hz: 50.0
+    input_topic: "/joint_states"
+    output_topic: "/arb/wheel_states"
+
+    left_joint: "left_wheel_joint"
+    right_joint: "right_wheel_joint"
+    counts_per_revolution: 1024
+    quadrature_multiplier: 4          # -> 4096 counts/rev -> 1.534 mrad resolution
+
+    velocity_noise_sigma: 0.010       # rad/s
+    slip_ratio_mean: 0.0
+    slip_ratio_sigma: 0.01
+    max_dt_s: 0.5
+    seed: 2
+
+    fault:
+      left_bias_rad_s: 0.0
+      right_bias_rad_s: 0.0
+      noise_scale: 1.0
+      outage: false
+
+/**/lidar_preprocessor:
+  ros__parameters:
+    rate_hz: 10.0
+    input_topic: "/scan_raw"
+    output_topic: "/arb/scan"
+
+    # The scanner's NOMINAL noise, matching configs/sensors.yaml. Gazebo already
+    # applies it inside the sensor model, which `input_carries_nominal_noise`
+    # declares: this stage then injects only the EXTRA noise a fault calls for,
+    # sqrt((noise_scale*sigma)^2 - sigma^2), which is zero at noise_scale = 1.
+    # Setting this to 0.0 "to avoid double counting" would instead break the
+    # fault knob, since every scaled target would also be zero.
+    range_noise_sigma: 0.015
+    input_carries_nominal_noise: true
+    dropout_probability: 0.0
+
+    despeckle: true
+    # Threshold is derived per beam from  r * tan(obliquity) * angle_increment,
+    # not fixed: at 10 m a wall seen at 75 deg obliquity legitimately steps
+    # 0.65 m between neighbouring beams. A fixed 0.25 m threshold discarded
+    # 12 beams per scan here, 99.9 % of which were real wall returns.
+    despeckle_max_obliquity_deg: 85.0
+    despeckle_floor_m: 0.05
+    seed: 3
+
+    fault:
+      dropout_ratio: 0.0
+      noise_scale: 1.0
+      burst_mode: false
+      burst_active: false
+      outage: false

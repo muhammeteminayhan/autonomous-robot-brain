@@ -5,13 +5,13 @@ Gazebo estimates its own pose from noisy IMU, wheel-encoder and 2D LiDAR data,
 maps its surroundings, plans a collision-free route to a goal, and keeps doing
 so while its sensors are deliberately degraded and failed.
 
-> **Project status: Phases 0-1 of 12 complete and verified.**
-> The robot drives in a Gazebo Harmonic world with working IMU, wheel encoders
-> and 2D LiDAR. A scan-versus-floor-plan residual analysis puts the end-to-end
-> geometric error at 0.0149 m standard deviation against a configured sensor
-> noise of 0.015 m, i.e. the pipeline adds no measurable error of its own.
-> Sensor preprocessing (Phase 2) is next. See
-> [Verification status](#verification-status) for exactly what has been run.
+> **Project status: Phases 0-2 of 12 complete and verified.**
+> The robot drives in a Gazebo Harmonic world with a working IMU, wheel
+> encoders and 2D LiDAR, all passing through a preprocessing layer that models
+> quantisation, Gauss-Markov bias, slip and beam dropout, publishes honest
+> measurement covariances, and accepts fault injection at runtime.
+> 83 unit tests and 86 integration tests pass. Odometry (Phase 3) is next.
+> See [Verification status](#verification-status) for exactly what has been run.
 
 ---
 
@@ -190,6 +190,27 @@ Overlay a live scan on the known floor plan:
 python3 scripts/plot_scan_vs_world.py -o results/phase1/scan_vs_world.png
 ```
 
+Bring up the sensor preprocessing layer, and verify it:
+
+```bash
+ros2 launch arb_sensors sensors.launch.py
+python3 scripts/verify_sensors.py
+```
+
+Inject a fault at runtime, with the stack running:
+
+```bash
+ros2 param set /imu_preprocessor fault.noise_scale 10.0
+```
+
+```bash
+ros2 param set /encoder_preprocessor fault.right_bias_rad_s 0.05
+```
+
+```bash
+ros2 param set /lidar_preprocessor fault.dropout_ratio 0.6
+```
+
 Regenerate the world after editing `configs/world.yaml`:
 
 ```bash
@@ -221,6 +242,33 @@ Measured residual of each beam endpoint to the nearest modelled surface:
 The residual spread equals the configured measurement noise, so the geometric
 pipeline contributes no bias and no additional error.
 
+### Sensor preprocessing
+
+`arb_sensors` turns the simulator's idealised output into something the
+corresponding hardware could actually have produced, and is the single place
+faults are injected.
+
+| Stage | What it models |
+|---|---|
+| IMU | Gauss-Markov bias (exact Ornstein-Uhlenbeck update), scale error, startup bias calibration, honest covariance, `orientation_covariance[0] = -1` to declare that this is not an AHRS |
+| Encoders | Quadrature quantisation (1024x4 counts/rev = 1.534 mrad = 0.092 mm of arc), velocity by differencing counts, per-wheel slip and injectable drift |
+| LiDAR | One sentinel for every unmeasurable beam, geometric despeckling, range noise, per-beam and bursty dropout |
+
+Three properties are worth calling out, because each was a bug first:
+
+* **Noise is not double-counted.** Gazebo already applies the datasheet noise.
+  Adding another full sigma combines as `sqrt(2) * sigma`, making the stream
+  41 % noisier than the part being simulated and every published covariance
+  wrong by the same factor. Independent variances add, so this stage injects
+  only `sqrt((scale*sigma)^2 - sigma^2)` -- exactly zero at nominal.
+* **Degrading a sensor widens its reported covariance.** A fault that worsens
+  the data without telling the filter teaches it nothing; the EKF keeps
+  trusting a sensor that has failed.
+* **The fault knob is calibrated.** Despeckling runs before dropout, because
+  with it afterwards a commanded 60 % beam loss measured 75.5 %: most survivors
+  of a random 60 % cull have no surviving neighbour, so the filter removed them
+  too.
+
 ### Topic graph
 
 ```
@@ -235,6 +283,11 @@ pipeline contributes no bias and no additional error.
 
   /cmd_vel  --(ROS to GZ)-->  DiffDrive plugin  -->  wheel torques
   /robot_description  -->  robot_state_publisher  -->  /tf, /tf_static
+
+                            arb_sensors
+  /imu/data_raw   -->  imu_preprocessor      -->  /arb/imu           200 Hz
+  /joint_states   -->  encoder_preprocessor  -->  /arb/wheel_states   50 Hz
+  /scan_raw       -->  lidar_preprocessor    -->  /arb/scan           10 Hz
 ```
 
 Gazebo and ROS 2 run on separate middlewares. A sensor that is configured
@@ -292,19 +345,25 @@ to work until it has been executed.
 |---|---|---|
 | Environment (ROS 2 Jazzy, Gazebo Sim 8.15.0, g++ 13.3, CMake 3.28, Eigen 3.4) | ✅ verified | `./scripts/check_environment.sh` → *Environment OK* |
 | `colcon build` | ✅ verified | 11/11 packages, zero stderr |
-| Unit tests (`colcon test`) | ✅ verified | **20 tests, 0 failures** |
-| Integration tests (`pytest tests/integration`) | ✅ verified | **57 passed, 1 skipped** |
-| Ground-truth isolation guard | ✅ verified | passes, and **fails correctly** when a violation is injected |
+| Unit tests (`colcon test`) | ✅ verified | **83 tests, 0 failures** |
+| Integration tests (`pytest tests/integration`) | ✅ verified | **86 passed, 1 skipped** |
+| Unit tests are not vacuous | ✅ verified | 5 deliberate mutations injected; all 5 caught (3 escaped the first round and the tests were strengthened) |
+| Ground-truth isolation guard | ✅ verified | passes, and fails correctly when a violation is injected |
 | URDF matches `configs/robot.yaml` | ✅ verified | every dimension compared in `test_urdf_model.py` |
+| Node params match `configs/sensors.yaml` | ✅ verified | `test_config_consistency.py` (caught one real drift) |
 | `base_link` survives URDF→SDF lumping | ✅ verified | `test_sdf_conversion_keeps_base_link` |
-| Gazebo world loads | ✅ verified | `gz sdf -k arb_indoor.sdf` → *Valid* |
-| Robot spawns and drives | ✅ verified | `verify_simulation.py` → all checks pass |
-| Sensor rates (IMU 200 / encoders 50 / LiDAR 10 / truth 100 Hz) | ✅ verified | measured 200.00 / 50.00 / 10.00 / 100.00 Hz |
-| Robot rests level | ✅ verified | `gz model -p` → pitch 0.000000 rad, z 0.100000 m |
-| Wheel arc equals distance travelled | ✅ verified | 0.648 m vs 0.648 m, 0.0 % disagreement |
-| Scan matches floor plan | ✅ verified | residual sigma 0.0149 m vs 0.015 m configured noise |
-| Sensor preprocessing / fault injection | ❌ not implemented | Phase 2, 10 |
+| Robot spawns, drives, rests level | ✅ verified | pitch 0.000000 rad, z 0.100000 m; wheel arc vs truth 0.0 % |
+| Scan matches floor plan | ✅ verified | residual sigma 0.0149 m vs 0.015 m configured noise, 99.7 % within 5 cm |
+| Preprocessed stream rates | ✅ verified | 200.00 / 50.00 / 10.00 Hz measured |
+| IMU covariance equals the datasheet sigma | ✅ verified | 0.004950 rad/s published, measured stdev 0.005019 |
+| Encoder positions lie on the count grid | ✅ verified | 0 of 600 samples off the 1.534 mrad grid |
+| Encoder velocity integrates to position | ✅ verified | worst mismatch 2.2e-19 rad |
+| Despeckling preserves real returns | ✅ verified | 0 beams removed from 43 200; previously 12 per scan, 99.9 % of them real walls |
+| Runtime fault injection changes the data | ✅ verified | `noise_scale=10` → 9.7x measured spread, covariance 100x |
+| Commanded dropout is not amplified | ✅ verified | 60 % commanded → 39.2 % of beams survived (expected 40 %) |
+| Sensor outage stops and recovers the stream | ✅ verified | 0 scans during outage, 21 after clearing |
 | Odometry, EKF, mapping, planning, control | ❌ not implemented | Phases 3-9 |
+| Fault scenario timeline (Cases A-F) | ❌ not implemented | Phase 10 — the runtime knobs exist, the scheduler does not |
 
 
 ---
