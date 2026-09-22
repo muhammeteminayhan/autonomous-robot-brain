@@ -177,3 +177,70 @@ def test_lidar_angular_span_leaves_no_duplicate_beam(root_cfg: dict):
         f"beam spacing is {increment:.8f} rad, expected exactly "
         f"2*pi/{n} = {2.0 * math.pi / n:.8f}"
     )
+
+
+# ---------------------------------------------------------------- localisation
+
+LOCALIZATION_CFG = (
+    REPO_ROOT / "ros2_ws" / "src" / "arb_localization" / "config" / "localization.yaml"
+)
+
+
+@pytest.fixture(scope="module")
+def localization_cfg() -> dict:
+    raw = yaml.safe_load(LOCALIZATION_CFG.read_text())
+    return {key.split("/")[-1]: value["ros__parameters"] for key, value in raw.items()}
+
+
+def test_odometry_wheel_radius_matches_the_robot_model(localization_cfg: dict):
+    """Radius is geometry and must agree with the URDF's source of truth."""
+    robot = yaml.safe_load(ROOT_ROBOT.read_text())["robot"]["drive"]
+    assert math.isclose(
+        float(localization_cfg["wheel_odometry"]["wheel_radius_m"]),
+        float(robot["wheel_radius_m"]), rel_tol=1e-12)
+
+
+def test_odometry_encoder_spec_matches_the_sensor_config(
+        localization_cfg: dict, root_cfg: dict):
+    """The covariance model needs the same resolution the encoder actually has."""
+    enc = root_cfg["wheel_encoder"]
+    odo = localization_cfg["wheel_odometry"]
+    assert odo["counts_per_revolution"] == enc["counts_per_revolution"]
+    assert odo["quadrature_multiplier"] == enc["quadrature_multiplier"]
+
+
+def test_odometry_track_width_is_calibrated_not_geometric(localization_cfg: dict):
+    """The estimator's track width is a CALIBRATED value and must differ.
+
+    This test looks backwards and is deliberate. The URDF's 0.350 m is the
+    distance between the wheel centre planes and is correct as geometry. The
+    odometry needs the EFFECTIVE track width, which is where traction acts on a
+    line contact, measured at 0.3154 m.
+
+    Using the geometric value loses 10 % of every rotation: 72 degrees of
+    heading error over two laps of a rectangle, and a metre of position error
+    after 10 m, with the odometry still reporting a 5 cm loop closure. Someone
+    "fixing the inconsistency" by copying 0.350 across would reintroduce all of
+    it, so the difference is asserted rather than merely commented.
+    """
+    geometric = float(
+        yaml.safe_load(ROOT_ROBOT.read_text())["robot"]["drive"]["wheel_separation_m"])
+    calibrated = float(localization_cfg["wheel_odometry"]["wheel_separation_m"])
+
+    assert not math.isclose(calibrated, geometric, rel_tol=1e-6), (
+        "wheel_separation_m in localization.yaml equals the geometric value "
+        f"{geometric}. It must be the CALIBRATED effective track width; run "
+        "scripts/calibrate_odometry.py."
+    )
+    ratio = calibrated / geometric
+    assert 0.85 < ratio < 1.15, (
+        f"calibrated track width is {100 * (ratio - 1):+.1f} % from geometry, "
+        "which is too far to be a contact-patch effect; re-run the calibration"
+    )
+    # The physical bound: traction cannot act outside the wheel's own width.
+    wheel_width = float(
+        yaml.safe_load(ROOT_ROBOT.read_text())["robot"]["drive"]["wheel_width_m"])
+    assert geometric - wheel_width <= calibrated <= geometric + wheel_width, (
+        f"calibrated {calibrated} lies outside [inner edge, outer edge] = "
+        f"[{geometric - wheel_width}, {geometric + wheel_width}]"
+    )

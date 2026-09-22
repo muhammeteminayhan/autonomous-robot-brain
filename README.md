@@ -5,13 +5,15 @@ Gazebo estimates its own pose from noisy IMU, wheel-encoder and 2D LiDAR data,
 maps its surroundings, plans a collision-free route to a goal, and keeps doing
 so while its sensors are deliberately degraded and failed.
 
-> **Project status: Phases 0-2 of 12 complete and verified.**
+> **Project status: Phases 0-3 of 12 complete and verified.**
 > The robot drives in a Gazebo Harmonic world with a working IMU, wheel
-> encoders and 2D LiDAR, all passing through a preprocessing layer that models
-> quantisation, Gauss-Markov bias, slip and beam dropout, publishes honest
-> measurement covariances, and accepts fault injection at runtime.
-> 83 unit tests and 86 integration tests pass. Odometry (Phase 3) is next.
-> See [Verification status](#verification-status) for exactly what has been run.
+> encoders and 2D LiDAR behind a preprocessing layer that models quantisation,
+> Gauss-Markov bias, slip and beam dropout and accepts fault injection at
+> runtime. Wheel odometry integrates the encoders exactly on SE(2) and, after
+> calibrating the effective track width, drifts **0.94 % of distance
+> travelled** over a 10 m route. 107 unit tests and 90 integration tests pass.
+> The EKF (Phase 4) is next. See
+> [Verification status](#verification-status) for exactly what has been run.
 
 ---
 
@@ -211,6 +213,20 @@ ros2 param set /encoder_preprocessor fault.right_bias_rad_s 0.05
 ros2 param set /lidar_preprocessor fault.dropout_ratio 0.6
 ```
 
+Bring up wheel odometry, measure its drift, and recalibrate it:
+
+```bash
+ros2 launch arb_localization odometry.launch.py
+```
+
+```bash
+python3 scripts/evaluate_odometry.py
+```
+
+```bash
+python3 scripts/calibrate_odometry.py
+```
+
 Regenerate the world after editing `configs/world.yaml`:
 
 ```bash
@@ -269,6 +285,39 @@ Three properties are worth calling out, because each was a bug first:
   of a random 60 % cull have no surviving neighbour, so the filter removed them
   too.
 
+### Odometry
+
+`arb_localization/wheel_odometry` integrates the preprocessed encoders and
+publishes `nav_msgs/Odometry` plus the `odom -> base_link` transform. It uses
+the **exact** SE(2) arc update rather than forward Euler:
+
+```
+x     += v dt * sinc(a/2) * cos(theta + a/2)      a = omega * dt
+y     += v dt * sinc(a/2) * sin(theta + a/2)      sinc(u) = sin(u)/u
+theta += a
+```
+
+No singularity at `omega = 0`, midpoint heading, and `sinc` is the chord-to-arc
+ratio. Both covariance Jacobians are verified against central finite
+differences.
+
+**The effective track width is a calibration parameter, not a measurement.**
+A cylindrical wheel touches the floor along a line, and the traction that turns
+the robot does not act at the wheel's centre plane. Measured effective width:
+**0.3154 m** against a geometric 0.350 m — the distance between the wheels'
+inner edges, to within a millimetre.
+
+| Metric over a 10 m route | Geometric `L` | Calibrated `L` |
+|---|---|---|
+| Final position error | 0.989 m (9.86 %) | **0.095 m (0.94 %)** |
+| Final heading error | −72.36° | **6.96°** |
+| RMS position error | 0.540 m | **0.055 m** |
+
+![Odometry drift](results/phase3/odometry_drift.png)
+
+The heading error is a staircase: it steps at every turn and is flat on every
+straight. That residual is what Phase 4 exists to bound.
+
 ### Topic graph
 
 ```
@@ -288,6 +337,10 @@ Three properties are worth calling out, because each was a bug first:
   /imu/data_raw   -->  imu_preprocessor      -->  /arb/imu           200 Hz
   /joint_states   -->  encoder_preprocessor  -->  /arb/wheel_states   50 Hz
   /scan_raw       -->  lidar_preprocessor    -->  /arb/scan           10 Hz
+
+                            arb_localization
+  /arb/wheel_states  -->  wheel_odometry  -->  /arb/odom           50 Hz
+                                          -->  TF odom->base_link
 ```
 
 Gazebo and ROS 2 run on separate middlewares. A sensor that is configured
@@ -345,24 +398,24 @@ to work until it has been executed.
 |---|---|---|
 | Environment (ROS 2 Jazzy, Gazebo Sim 8.15.0, g++ 13.3, CMake 3.28, Eigen 3.4) | ✅ verified | `./scripts/check_environment.sh` → *Environment OK* |
 | `colcon build` | ✅ verified | 11/11 packages, zero stderr |
-| Unit tests (`colcon test`) | ✅ verified | **83 tests, 0 failures** |
-| Integration tests (`pytest tests/integration`) | ✅ verified | **86 passed, 1 skipped** |
-| Unit tests are not vacuous | ✅ verified | 5 deliberate mutations injected; all 5 caught (3 escaped the first round and the tests were strengthened) |
+| Unit tests (`colcon test`) | ✅ verified | **107 tests, 0 failures** |
+| Integration tests (`pytest tests/integration`) | ✅ verified | **90 passed, 1 skipped** |
+| Unit tests are not vacuous | ✅ verified | 13 deliberate mutations injected across two packages; all caught (5 escaped first and the tests were strengthened) |
 | Ground-truth isolation guard | ✅ verified | passes, and fails correctly when a violation is injected |
 | URDF matches `configs/robot.yaml` | ✅ verified | every dimension compared in `test_urdf_model.py` |
-| Node params match `configs/sensors.yaml` | ✅ verified | `test_config_consistency.py` (caught one real drift) |
-| `base_link` survives URDF→SDF lumping | ✅ verified | `test_sdf_conversion_keeps_base_link` |
-| Robot spawns, drives, rests level | ✅ verified | pitch 0.000000 rad, z 0.100000 m; wheel arc vs truth 0.0 % |
-| Scan matches floor plan | ✅ verified | residual sigma 0.0149 m vs 0.015 m configured noise, 99.7 % within 5 cm |
+| Node params match the repo config | ✅ verified | `test_config_consistency.py` (caught one real drift) |
+| Robot spawns, drives, rests level | ✅ verified | pitch 0.000000 rad, z 0.100000 m |
+| Scan matches floor plan | ✅ verified | residual sigma 0.0149 m vs 0.015 m configured noise |
 | Preprocessed stream rates | ✅ verified | 200.00 / 50.00 / 10.00 Hz measured |
-| IMU covariance equals the datasheet sigma | ✅ verified | 0.004950 rad/s published, measured stdev 0.005019 |
+| IMU covariance equals the datasheet sigma | ✅ verified | 0.004950 rad/s published, 0.005019 measured |
 | Encoder positions lie on the count grid | ✅ verified | 0 of 600 samples off the 1.534 mrad grid |
-| Encoder velocity integrates to position | ✅ verified | worst mismatch 2.2e-19 rad |
-| Despeckling preserves real returns | ✅ verified | 0 beams removed from 43 200; previously 12 per scan, 99.9 % of them real walls |
-| Runtime fault injection changes the data | ✅ verified | `noise_scale=10` → 9.7x measured spread, covariance 100x |
-| Commanded dropout is not amplified | ✅ verified | 60 % commanded → 39.2 % of beams survived (expected 40 %) |
-| Sensor outage stops and recovers the stream | ✅ verified | 0 scans during outage, 21 after clearing |
-| Odometry, EKF, mapping, planning, control | ❌ not implemented | Phases 3-9 |
+| Runtime fault injection changes the data | ✅ verified | `noise_scale=10` → 9.7x spread, covariance 100x |
+| Commanded dropout is not amplified | ✅ verified | 60 % commanded → 39.2 % of beams survived |
+| Odometry integrates a circle exactly | ✅ verified | full circle closes to 1e-9 m, independent of step size |
+| Odometry Jacobians match finite differences | ✅ verified | central differences, 1e-5 tolerance |
+| Odometry drift | ✅ measured | **0.094 m over 10.04 m = 0.94 % of distance**, heading 6.96° |
+| Track width calibration | ✅ verified | 0.3500 → 0.3154 m, direction asymmetry 0.00 % |
+| EKF, mapping, planning, control | ❌ not implemented | Phases 4-9 |
 | Fault scenario timeline (Cases A-F) | ❌ not implemented | Phase 10 — the runtime knobs exist, the scheduler does not |
 
 

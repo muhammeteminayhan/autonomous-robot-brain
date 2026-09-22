@@ -1,0 +1,101 @@
+# =============================================================================
+# Parameters for the localisation stack.
+#
+# The geometry here MUST agree with configs/robot.yaml, which is the single
+# source of truth the URDF also reads. tests/integration/test_config_consistency.py
+# asserts that. A mismatch between the simulated wheel radius and the one used
+# here is a pure scale error on every distance the robot believes it travelled,
+# and it looks exactly like sensor drift.
+# =============================================================================
+
+/**/wheel_odometry:
+  ros__parameters:
+    input_topic: "/arb/wheel_states"
+    output_topic: "/arb/odom"
+
+    # --- geometry ---
+    #
+    # wheel_radius_m mirrors configs/robot.yaml exactly; calibration measured
+    # it as 0.05997, a 0.05 % difference that is not worth encoding.
+    #
+    # wheel_separation_m DELIBERATELY DOES NOT match configs/robot.yaml, and
+    # that is the single most important line in this file.
+    #
+    # The URDF is correct: the wheel centre planes really are 0.350 m apart.
+    # But a cylindrical wheel touches the floor along a LINE, not at a point,
+    # and the traction that turns the robot does not act at the centre plane.
+    # Measured on this platform (scripts/calibrate_odometry.py, three full
+    # turns in each direction, direction asymmetry 0.00 %):
+    #
+    #     rotation ratio odom/true = 0.9010
+    #     effective track width    = 0.350 * 0.9010 = 0.3154 m
+    #
+    # which is the distance between the wheels' INNER EDGES
+    # (0.350 - 0.035 = 0.315 m) to within a millimetre.
+    #
+    # With the geometric 0.350 the odometry under-reports every rotation by
+    # 10 %: 9 degrees lost on each 90 degree turn, 72 degrees over two laps of
+    # a rectangle, and a metre of position error after 10 m -- while the
+    # odometry reported closing the loop to 5 cm. Distance was perfect
+    # throughout. A systematic error is not noise, and no Kalman filter removes
+    # a bias it has not been told about, so this must be fixed HERE rather than
+    # tuned around in Phase 4.
+    #
+    # This is why L is a calibration parameter on every real differential-drive
+    # robot, and why it lives in the localisation config rather than the robot
+    # model.
+    wheel_radius_m: 0.060
+    wheel_separation_m: 0.3154
+    counts_per_revolution: 1024
+    quadrature_multiplier: 4
+
+    # --- frames (REP-105) ---
+    # This node owns odom -> base_link ONLY. The map -> odom correction belongs
+    # to the EKF in Phase 4; writing a correction into this transform instead
+    # would make the controller's reference frame jump.
+    odom_frame: "odom"
+    base_frame: "base_link"
+    publish_tf: true
+
+    # --- motion model noise ---
+    # Variance added per metre of wheel arc, one coefficient per wheel. The
+    # units are m^2 per m, so the STANDARD DEVIATION grows as sqrt(distance):
+    # at k = 0.002, one metre of travel adds 4.5 cm of 1-sigma, ten metres adds
+    # 14 cm. The two wheels are independent, which is what makes the heading
+    # uncertainty grow at all -- perfectly correlated wheel errors would cancel
+    # in (s_right - s_left).
+    #
+    # Tuned against a measured run rather than guessed. With the track width
+    # calibrated, 10.04 m of driving produced 0.091 m of position error and
+    # 6.6 degrees of heading error. At k = 0.002 the filter reported a 1-sigma
+    # of 0.737 m and 40 degrees: eight times the error it actually had.
+    #
+    # An over-conservative covariance is not harmless. In Phase 4 the Kalman
+    # gain is set by the RATIO of process to measurement uncertainty, so a
+    # prediction that claims to be eight times worse than it is makes the
+    # filter throw away good odometry and chase every measurement, which shows
+    # up as a jittery estimate rather than an obviously wrong one.
+    #
+    # Since sigma scales as sqrt(k), k = 2e-4 (a tenth) gives roughly a third
+    # of the reported spread: about 0.23 m and 12.6 degrees after 10 m, which
+    # is two to three times the observed error. Deliberately still on the
+    # conservative side: an overconfident filter diverges, a slightly
+    # conservative one merely converges more slowly.
+    k_right: 2.0e-4
+    k_left: 2.0e-4
+
+    # A stationary robot still gains a little uncertainty. Without this the
+    # covariance freezes the moment the wheels stop, claiming perfect knowledge
+    # of a robot that might be being pushed.
+    min_variance_per_step: 1.0e-9
+
+    # --- rejection thresholds ---
+    max_dt_s: 0.5
+    # 2 rad of wheel rotation in one sample is 0.12 m of arc; at 50 Hz that
+    # would be 6 m/s, far beyond the platform's 0.7 m/s limit. Anything larger
+    # is a dropped sample or a corrupted count, and integrating it teleports
+    # the estimate.
+    max_wheel_step_rad: 2.0
+
+    left_joint: "left_wheel_joint"
+    right_joint: "right_wheel_joint"

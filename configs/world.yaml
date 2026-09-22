@@ -94,3 +94,20 @@ world:
     goal_room_e:  { x:  6.0, y: -5.5, yaw: 0.0 }
     goal_alcove:  { x: -8.5, y:  5.5, yaw: 0.0 }
     goal_far_east: { x:  8.5, y:  0.0, yaw: 0.0 }
+
+    # Largest obstacle-free disc in the world, 1.93 m clear in every direction,
+    # found by a clearance sweep over the floor plan. Used by
+    # scripts/evaluate_odometry.py.
+    #
+    # WHY A DEDICATED POSE EXISTS
+    # The default spawn sits 1.5 m from a corridor pillar. An open-loop
+    # evaluation route drives straight into it, the wheels keep turning against
+    # a stationary chassis, and the odometry integrates motion that never
+    # happened. Measured that way, "odometry drift" came out at 35 % of
+    # distance travelled: a number describing a collision, not an estimator.
+    #
+    # A second attempt in Room B had only 0.82 m of margin, and the open-loop
+    # route drifted into it. Open-loop evaluation needs margin for the very
+    # error it is measuring, so the pose is chosen by maximum clearance rather
+    # than by eye.
+    odometry_test: { x:  3.0, y: -3.5, yaw: 0.0 }
