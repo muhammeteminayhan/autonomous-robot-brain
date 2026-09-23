@@ -153,6 +153,11 @@ struct DwaResult
   double path_remaining_m{0.0};
   double approach_speed_cap{0.0};
   double carrot_distance_m{0.0};
+
+  /// True when no forward command was admissible and the planner fell back to
+  /// turning on the spot. Reported so a caller can tell "blocked and looking
+  /// for a way out" apart from "arrived", which otherwise both read as v = 0.
+  bool rotating_in_place{false};
 };
 
 /// The Dynamic Window Approach (Fox, Burgard and Thrun, 1997).
@@ -227,7 +232,24 @@ public:
   const DwaConfig & config() const {return config_;}
   DwaConfig & mutableConfig() {return config_;}
 
+  /// Forget the escape rotation's committed direction, e.g. on a new goal.
+  void reset() {escape_direction_ = 0;}
+
 private:
+  /// Which way the robot committed to turning when it found itself boxed in,
+  /// or 0 when it is not.
+  ///
+  /// It MUST be latched. Choosing the direction fresh each cycle from the
+  /// bearing to the aim point means the sign flips as soon as the robot has
+  /// turned past it, and the robot jitters on the spot indefinitely: measured
+  /// at omega = -0.019, -0.048, -0.106, +0.179 rad/s over four consecutive
+  /// reports, having moved 0.3 m in 50 s.
+  ///
+  /// `mutable` because this is a decision the planner carries between calls
+  /// while `plan()` stays const; the alternative is to push the memory into
+  /// every caller, which is worse.
+  mutable int escape_direction_{0};
+
   DwaConfig config_;
 };
 

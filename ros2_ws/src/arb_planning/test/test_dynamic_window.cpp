@@ -573,6 +573,83 @@ TEST(Dwa, RemainingDistanceIsAlongThePathNotTheStraightLine)
   EXPECT_GT(r.v, 0.4) << "throttled to " << r.v << " with 6 m of path left";
 }
 
+TEST(Dwa, CommitsToOneDirectionWhenItHasToTurnOnTheSpot)
+{
+  // A robot that has ended up closer to a wall than its own safety radius has
+  // no admissible forward command, and turning on the spot is the only way out.
+  // The direction of that turn must be LATCHED.
+  //
+  // THE BUG: the side was chosen fresh each cycle from the bearing to the goal.
+  // The moment the robot turned past that bearing the sign flipped, and it
+  // oscillated across the bearing indefinitely. Measured in a live run: 0.3 m of
+  // progress in 50 s, omega cycling -0.019, -0.048, -0.106, +0.179 rad/s.
+  DwaConfig cfg = config();
+  DynamicWindowPlanner planner(cfg);
+
+  // Obstacles all around at 0.2 m -- inside the 0.25 m robot radius, so nothing
+  // forward is admissible whatever the robot does.
+  std::vector<ObstaclePoint> boxed;
+  for (int i = 0; i < 36; ++i) {
+    const double a = i * 2.0 * arb_core::pi<double>() / 36.0;
+    boxed.push_back({0.2 * std::cos(a), 0.2 * std::sin(a)});
+  }
+  const auto path = denseLine(
+    {Pose2D(0.0, 0.0, 0.0), Pose2D(0.0, 2.0, 0.0)}, 0.05);   // goal to the LEFT
+
+  double th = 0.0, omega = 0.0;
+  const double dt = 0.05;
+  int sign_changes = 0;
+  double previous = 0.0;
+  for (int i = 0; i < 100; ++i) {
+    // The path is re-expressed in the robot frame as it turns, exactly as the
+    // node does -- so the bearing to the goal sweeps through zero and back.
+    std::vector<Pose2D> local;
+    const double c = std::cos(-th), s = std::sin(-th);
+    for (const auto & q : path) {
+      local.emplace_back(c * q.x - s * q.y, s * q.x + c * q.y, 0.0);
+    }
+    const auto r = planner.plan(0.0, omega, local.back(), local, boxed, dt);
+    ASSERT_TRUE(r.success) << r.failure_reason << " at step " << i;
+    EXPECT_TRUE(r.rotating_in_place) << "should have reported the fallback";
+    if (i > 0 && r.omega * previous < 0.0) {++sign_changes;}
+    previous = r.omega;
+    omega = r.omega;
+    th = arb_core::normalizeAngle(th + omega * dt);
+  }
+  EXPECT_EQ(sign_changes, 0)
+    << "reversed direction " << sign_changes << " times while boxed in";
+  EXPECT_GT(std::abs(omega), 1.0)
+    << "never spun up: ended at " << omega << " rad/s";
+}
+
+TEST(Dwa, ReleasesTheCommittedDirectionOnceItCanDriveAgain)
+{
+  // The latch must not outlive the situation that created it, or the next
+  // escape inherits a direction chosen for a different obstacle.
+  DynamicWindowPlanner planner(config());
+  std::vector<ObstaclePoint> boxed;
+  for (int i = 0; i < 36; ++i) {
+    const double a = i * 2.0 * arb_core::pi<double>() / 36.0;
+    boxed.push_back({0.2 * std::cos(a), 0.2 * std::sin(a)});
+  }
+  const auto left = denseLine({Pose2D(0.0, 0.0, 0.0), Pose2D(0.0, 2.0, 0.0)}, 0.05);
+  const auto blocked = planner.plan(0.0, 0.0, left.back(), left, boxed, 0.05);
+  ASSERT_TRUE(blocked.rotating_in_place);
+  EXPECT_GT(blocked.omega, 0.0) << "goal is to the left, so turn left";
+
+  // Clear the obstacles: a forward command exists again.
+  const auto clear = planner.plan(0.0, 0.0, left.back(), left, {}, 0.05);
+  ASSERT_TRUE(clear.success);
+  EXPECT_FALSE(clear.rotating_in_place);
+
+  // Boxed in again with the goal now to the RIGHT: the direction must be
+  // chosen afresh, not inherited.
+  const auto right = denseLine({Pose2D(0.0, 0.0, 0.0), Pose2D(0.0, -2.0, 0.0)}, 0.05);
+  const auto again = planner.plan(0.0, 0.0, right.back(), right, boxed, 0.05);
+  ASSERT_TRUE(again.rotating_in_place);
+  EXPECT_LT(again.omega, 0.0) << "goal is to the right, so turn right";
+}
+
 int main(int argc, char ** argv)
 {
   ::testing::InitGoogleTest(&argc, argv);

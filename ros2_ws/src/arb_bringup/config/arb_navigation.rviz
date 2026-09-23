@@ -1,0 +1,189 @@
+# Everything the stack produces, on one screen.
+#
+# The Phase 1 config in arb_description shows the robot and its raw scan against
+# the `odom` frame, which is the right view when the question is "is the sensor
+# chain working". This one is fixed to `map` and adds the things the later
+# phases produce: the occupancy grid, the EKF's estimate, the global plan, and
+# ground truth for comparison.
+#
+# QoS MATTERS HERE and gets people stuck. RViz must match the publisher or it
+# receives nothing and shows no error:
+#   /arb/map            Transient Local  (latched: published once per update)
+#   /arb/scan           Best Effort      (sensor stream)
+#   /robot_description  Transient Local
+# A "Reliable" reader on a Best Effort topic silently gets nothing.
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+        - /Map1
+        - /GlobalPath1
+      Splitter Ratio: 0.5
+    Tree Height: 700
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 24
+      Color: 160; 160; 164
+      Alpha: 0.2
+      Reference Frame: <Fixed Frame>
+
+    # --- the map the robot built itself ---------------------------------
+    - Class: rviz_default_plugins/Map
+      Name: Map
+      Enabled: true
+      Topic:
+        Value: /arb/map
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Alpha: 0.75
+      Color Scheme: map
+      Draw Behind: true
+
+    - Class: rviz_default_plugins/RobotModel
+      Name: RobotModel
+      Enabled: true
+      Description Topic:
+        Value: /robot_description
+        Depth: 5
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Alpha: 1
+      Visual Enabled: true
+      Collision Enabled: false
+
+    # --- the live scan, in the map frame --------------------------------
+    - Class: rviz_default_plugins/LaserScan
+      Name: LaserScan
+      Enabled: true
+      Topic:
+        Value: /arb/scan
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+      Style: Points
+      Size (Pixels): 3
+      Color Transformer: FlatColor
+      Color: 255; 60; 60
+      Decay Time: 0
+
+    # --- what A* planned ------------------------------------------------
+    - Class: rviz_default_plugins/Path
+      Name: GlobalPath
+      Enabled: true
+      Topic:
+        Value: /arb/global_path
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Color: 25; 200; 255
+      Alpha: 1
+      Line Style: Lines
+      Buffer Length: 1
+
+    # --- where the EKF thinks the robot is, and how sure it is ----------
+    # The ellipse is the covariance. Watch it grow while the robot dead
+    # reckons and collapse the moment a scan match is accepted -- that
+    # collapse IS the absolute correction, made visible.
+    - Class: rviz_default_plugins/PoseWithCovariance
+      Name: EkfPose
+      Enabled: true
+      Topic:
+        Value: /arb/pose
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+      Covariance:
+        Value: true
+        Position:
+          Alpha: 0.25
+          Color: 204; 51; 204
+          Scale: 1
+        Orientation:
+          Value: true
+          Alpha: 0.35
+          Color: 255; 255; 127
+          Scale: 1
+      Shape: Arrow
+      Color: 25; 130; 255
+      Alpha: 1
+      Shaft Length: 0.3
+      Shaft Radius: 0.04
+      Head Length: 0.12
+      Head Radius: 0.08
+
+    # --- ground truth, for comparison only ------------------------------
+    # Off by default, and never an input to anything. Turn it on to see how
+    # far the estimate has drifted; see docs/architecture.md section 4.
+    - Class: rviz_default_plugins/Odometry
+      Name: GroundTruth
+      Enabled: false
+      Topic:
+        Value: /arb/ground_truth/odom
+        Depth: 100
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+      Keep: 300
+      Position Tolerance: 0.1
+      Angle Tolerance: 0.1
+      Shape:
+        Alpha: 0.6
+        Color: 60; 200; 60
+        Shaft Length: 0.25
+        Shaft Radius: 0.03
+        Head Length: 0.1
+        Head Radius: 0.06
+
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: false
+      Marker Scale: 0.5
+      Show Arrows: true
+      Show Axes: true
+      Show Names: true
+      Update Interval: 0
+      Frame Timeout: 15
+
+  Global Options:
+    Background Color: 38; 38; 40
+    # `map` and not `odom`: the map frame is the one the grid and the plan
+    # live in. Fixed to `odom`, the map appears to slide whenever the scan
+    # matcher corrects the estimate.
+    Fixed Frame: map
+    Frame Rate: 30
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+    # Click "2D Goal Pose" in the toolbar and click a point on the map to
+    # send a goal, instead of typing a ros2 topic pub.
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Value: /arb/goal
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 26
+      Focal Point: {X: 0, Y: 0, Z: 0}
+      # Nearly top-down: this is a planar robot and an oblique view makes the
+      # occupancy grid hard to read.
+      Pitch: 1.4
+      Yaw: 3.14
+      Target Frame: <Fixed Frame>
+Window Geometry:
+  Height: 1000
+  Width: 1700
+  Displays: {collapsed: false}

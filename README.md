@@ -14,7 +14,7 @@ so while its sensors are deliberately degraded and failed.
 > the plan: **16.8 m from the west corridor through a 1.5 m doorway into Room E
 > in 36.5 s, collision-free, arriving 0.30 m from the goal.** Two controllers —
 > a DWA local planner and a pure-pursuit/PID follower — are measured against
-> each other on an identical course. 271 unit tests and 93 integration tests
+> each other on an identical course. 273 unit tests and 94 integration tests
 > pass. Fault injection (Phase 10) is next. See
 > [Verification status](#verification-status) for exactly what has been run.
 
@@ -686,8 +686,8 @@ to work until it has been executed.
 |---|---|---|
 | Environment (ROS 2 Jazzy, Gazebo Sim 8.15.0, g++ 13.3, CMake 3.28, Eigen 3.4) | ✅ verified | `./scripts/check_environment.sh` → *Environment OK* |
 | `colcon build` | ✅ verified | 11/11 packages, zero stderr |
-| Unit tests (`colcon test`) | ✅ verified | **271 tests, 0 failures** |
-| Integration tests (`pytest tests/integration`) | ✅ verified | **93 passed, 1 skipped** |
+| Unit tests (`colcon test`) | ✅ verified | **273 tests, 0 failures** |
+| Integration tests (`pytest tests/integration`) | ✅ verified | **94 passed, 1 skipped** |
 | Unit tests are not vacuous | ✅ verified | 41 deliberate mutations injected across five packages; all caught (10 escaped first and the tests were strengthened; 1 was an equivalent mutant and was removed) |
 | Planner benchmark | ✅ measured | [results/phase7/planner_benchmark.csv](results/phase7/planner_benchmark.csv) |
 | Ground-truth isolation guard | ✅ verified | passes, and fails correctly when a violation is injected |
@@ -719,6 +719,8 @@ to work until it has been executed.
 | Commands never leave the velocity limits | ✅ verified | `Follower.CommandsStayInsideTheVelocityLimits`, and `EscapesSaturationEvenWhenThePlantOvershootsTheLimit` reproduces the 11 % plant overshoot that latched the controller for 117 s |
 | Path following, PID | ✅ measured | cross-track RMSE **0.084 m**, settling 2.11 s, overshoot 4.2 %, collision-free ([results/phase9](results/phase9)) |
 | Path following, DWA | ✅ measured | cross-track RMSE **0.085 m**, settling 3.55 s, overshoot **0.0 %**, angular command **11x smoother** |
+| One-command bringup | ✅ verified | `ros2 launch arb_bringup bringup.launch.py` brings up all 11 nodes and drives to a goal; RViz config loads clean |
+| A boxed-in robot commits to one escape direction | ✅ verified | `Dwa.CommitsToOneDirectionWhenItHasToTurnOnTheSpot` — caught a live stall of 0.3 m in 50 s |
 | End-to-end navigation to a goal | ✅ measured | 16.8 m in 36.5 s through a doorway, min clearance 0.40 m, final error 0.300 m |
 | Fault scenario timeline (Cases A-F) | ❌ not implemented | Phase 10 — the runtime knobs exist, the scheduler does not |
 | Benchmark sweep (5 experiments) | ❌ not implemented | Phase 11 |

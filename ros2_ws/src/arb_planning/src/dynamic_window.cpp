@@ -317,10 +317,24 @@ DwaResult DynamicWindowPlanner::plan(
     // Every forward option is blocked. Rotating in place is still safe if the
     // robot is nearly stopped, and it is the only way out of a dead end.
     if (std::abs(current_v) < config_.in_place_rotation_speed) {
+      // Turn towards the AIM POINT -- the carrot when there is a path, the goal
+      // otherwise -- and COMMIT to that direction until a forward command
+      // becomes admissible again.
+      //
+      // Choosing the side fresh each cycle is what makes a boxed-in robot
+      // jitter rather than escape: the moment it has turned past the aim point
+      // the bearing changes sign, the rotation reverses, and it oscillates
+      // across the bearing forever. Measured, before the latch: 0.3 m of
+      // progress in 50 s while omega cycled through -0.019, -0.048, -0.106 and
+      // +0.179 rad/s.
+      if (escape_direction_ == 0) {
+        const arb_core::Pose2D & aim = carrot_valid ? carrot : goal;
+        escape_direction_ = (aim.y >= 0.0) ? 1 : -1;
+      }
       result.success = true;
+      result.rotating_in_place = true;
       result.v = 0.0;
-      // Turn towards the goal rather than picking a side arbitrarily.
-      result.omega = (goal.y >= 0.0 ? 1.0 : -1.0) *
+      result.omega = escape_direction_ *
         std::min(config_.max_angular_velocity, std::abs(w_hi));
       result.best.v = 0.0;
       result.best.omega = result.omega;
@@ -368,6 +382,9 @@ DwaResult DynamicWindowPlanner::plan(
     }
   }
 
+  // A forward command exists again, so the escape rotation is over and the
+  // next one is free to pick its own direction.
+  escape_direction_ = 0;
   result.success = true;
   result.v = result.best.v;
   result.omega = result.best.omega;
