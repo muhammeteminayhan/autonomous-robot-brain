@@ -5,12 +5,14 @@ Gazebo estimates its own pose from noisy IMU, wheel-encoder and 2D LiDAR data,
 maps its surroundings, plans a collision-free route to a goal, and keeps doing
 so while its sensors are deliberately degraded and failed.
 
-> **Project status: Phases 0-5 of 12 complete and verified.**
-> A six-state EKF fuses wheel odometry with the IMU gyroscope, estimating the
-> gyro bias online. Measured against ground truth over a 10 m route it cuts
-> position RMSE by **68 %** and heading RMSE by **61 %** against wheel odometry
-> alone, ending 0.13 % of distance travelled from the true pose.
-> 133 unit tests and 90 integration tests pass. Mapping (Phase 6) is next. See
+> **Project status: Phases 0-6 of 12 complete and verified.**
+> A six-state EKF fuses wheel odometry, the IMU gyroscope and LiDAR scan
+> matching against a map the robot builds itself. Against ground truth over a
+> 10 m route it cuts position RMSE by **68 %** and heading RMSE by **61 %**
+> versus wheel odometry alone. The robot explores an unknown 20 x 14 m world by
+> wall following and builds an occupancy grid that is structurally correct and
+> unrotated. 179 unit tests and 90 integration tests pass. Path planning
+> (Phase 7) is next. See
 > [Verification status](#verification-status) for exactly what has been run.
 
 ---
@@ -237,6 +239,22 @@ Run the odometry alone, as the baseline the filter is measured against:
 ros2 launch arb_localization odometry.launch.py ekf:=false
 ```
 
+Build a map by exploring, and score it against the known floor plan:
+
+```bash
+ros2 launch arb_mapping mapping.launch.py
+```
+
+```bash
+python3 scripts/evaluate_mapping.py --duration 240
+```
+
+See what dead reckoning alone does to the map:
+
+```bash
+ros2 launch arb_localization odometry.launch.py scan_match:=false
+```
+
 Regenerate the world after editing `configs/world.yaml`:
 
 ```bash
@@ -361,6 +379,41 @@ EKF's error stays flat. The gyro bounds the *rate* at which heading uncertainty
 accumulates, not the position error itself — that needs an absolute measurement,
 which arrives in Phase 6 when there is a map to match scans against.
 
+### Mapping and the absolute correction
+
+`arb_mapping` maintains a log-odds occupancy grid, 480 x 360 cells at 5 cm,
+integrating each scan with Bresenham ray casting and an inverse sensor model.
+The sensor pose comes from TF **at the scan's timestamp**, so tf2 interpolates:
+taking the newest pose instead rotates the whole scan by however far the robot
+turned while the estimate was catching up, which paints a starburst of free
+rays straight through the walls.
+
+`arb_localization/scan_matcher` matches each scan against that map using a
+likelihood field and a coarse-to-fine exhaustive search, and publishes a pose
+the EKF fuses as an **absolute** measurement. That is the only absolute
+measurement in the stack: encoders and gyroscopes measure change, so without it
+the position error can only grow. Measured without it, the map came out
+structurally correct and rotated several degrees after 82 m of exploration.
+
+| Metric | Reported 1σ, no scan match | With scan match |
+|---|---|---|
+| Position | 1.003 m | **0.017 m** |
+| Heading | 4.10° | **0.33°** |
+
+![Occupancy grid](results/phase6/map_scanmatch.png)
+
+Scored against the floor plan the world was generated from, with a one-cell
+tolerance: **precision 0.503, recall 0.436, free-space accuracy 0.949**, 65 % of
+cells observed over an 80 m wall-following traverse. The tolerance is strict —
+a wall boundary genuinely falls somewhere inside a cell, and the map is a
+raster.
+
+The map is built from the robot's own estimate and the estimate is corrected by
+the map, so a perfect match proves the scan agrees with the robot's beliefs
+rather than with the world. The reported covariance therefore has a floor.
+Breaking that circle needs loop closure and pose-graph optimisation, which is
+out of scope here and listed under limitations.
+
 ### Topic graph
 
 ```
@@ -385,9 +438,16 @@ which arrives in Phase 6 when there is a map to match scans against.
   /arb/wheel_states  -->  wheel_odometry  -->  /arb/odom           50 Hz
                                           -->  TF odom->base_link
 
-  /arb/odom  +  /arb/imu  -->  ekf  -->  /arb/pose            50 Hz
-                                    -->  /ekf/diagnostics     50 Hz
-                                    -->  TF map->odom
+  /arb/odom + /arb/imu + /arb/scan_match_pose
+                       -->  ekf  -->  /arb/pose            50 Hz
+                                 -->  /ekf/diagnostics     50 Hz
+                                 -->  TF map->odom
+
+                            arb_mapping
+  /arb/scan + TF(map->lidar_link) --> mapping --> /arb/map    2 Hz
+
+                    arb_localization/scan_matcher
+  /arb/map + /arb/scan --> scan_matcher --> /arb/scan_match_pose  2.5 Hz
 ```
 
 Gazebo and ROS 2 run on separate middlewares. A sensor that is configured
@@ -445,28 +505,28 @@ to work until it has been executed.
 |---|---|---|
 | Environment (ROS 2 Jazzy, Gazebo Sim 8.15.0, g++ 13.3, CMake 3.28, Eigen 3.4) | ✅ verified | `./scripts/check_environment.sh` → *Environment OK* |
 | `colcon build` | ✅ verified | 11/11 packages, zero stderr |
-| Unit tests (`colcon test`) | ✅ verified | **133 tests, 0 failures** |
+| Unit tests (`colcon test`) | ✅ verified | **179 tests, 0 failures** |
 | Integration tests (`pytest tests/integration`) | ✅ verified | **90 passed, 1 skipped** |
-| Unit tests are not vacuous | ✅ verified | 23 deliberate mutations injected across three packages; all caught (6 escaped first and the tests were strengthened) |
+| Unit tests are not vacuous | ✅ verified | 33 deliberate mutations injected across four packages; all caught (9 escaped first and the tests were strengthened) |
 | Ground-truth isolation guard | ✅ verified | passes, and fails correctly when a violation is injected |
 | URDF matches `configs/robot.yaml` | ✅ verified | every dimension compared in `test_urdf_model.py` |
 | Node params match the repo config | ✅ verified | `test_config_consistency.py` (caught one real drift) |
 | Robot spawns, drives, rests level | ✅ verified | pitch 0.000000 rad, z 0.100000 m |
 | Scan matches floor plan | ✅ verified | residual sigma 0.0149 m vs 0.015 m configured noise |
-| Preprocessed stream rates | ✅ verified | 200.00 / 50.00 / 10.00 Hz measured |
-| Runtime fault injection changes the data | ✅ verified | `noise_scale=10` → 9.7x spread, covariance 100x |
-| Odometry integrates a circle exactly | ✅ verified | full circle closes to 1e-9 m, independent of step size |
-| Odometry + EKF Jacobians match finite differences | ✅ verified | central differences, 1e-5 tolerance |
+| Odometry integrates a circle exactly | ✅ verified | closes to 1e-9 m, independent of step size |
+| Odometry, EKF and matcher Jacobians | ✅ verified | central finite differences |
 | Track width calibration | ✅ verified | 0.3500 → 0.3154 m, direction asymmetry 0.00 % |
-| Odometry drift | ✅ measured | 0.0946 m over 10.03 m = **0.94 %** of distance |
-| EKF drift | ✅ measured | 0.0134 m over 10.03 m = **0.13 %** of distance |
+| Odometry drift | ✅ measured | 0.94 % of distance over 10.03 m |
+| EKF drift | ✅ measured | **0.13 %** of distance over 10.03 m |
 | EKF improves on odometry | ✅ measured | position RMSE **−68.0 %**, heading RMSE **−60.6 %** |
 | EKF covariance is consistent | ✅ verified | 100 % of samples inside the reported 2σ; average NIS 2.0 ± 0.15 against 2 dof |
 | Gyro bias is observable and estimated | ✅ verified | converges to a 0.03 rad/s injected bias within 0.004 |
-| Both sensor streams are actually fused | ✅ verified | 467/470 odometry and 1833/1845 IMU measurements fused, 0 out of order |
-| Estimation latency | ✅ measured | median 55 ms, p95 60 ms, max 70 ms |
-| LiDAR absolute correction | ❌ not implemented | Phase 6 — there is no map to match against yet |
-| Mapping, planning, control | ❌ not implemented | Phases 6-9 |
+| Every sensor stream is actually fused | ✅ verified | odom 966/983, imu 3843/3913, scan-match 30/30, 0 out of order |
+| Scan matching bounds the uncertainty | ✅ measured | reported 1σ position 1.003 m → **0.017 m**, heading 4.10° → **0.33°** |
+| Occupancy grid vs known floor plan | ✅ measured | precision 0.503, recall 0.436, free-space accuracy 0.949 at one-cell tolerance |
+| Exploration coverage | ✅ measured | 65 % of cells observed over 80 m of wall following |
+| Estimation latency | ✅ measured | median 55 ms; the published estimate is predicted forward to the current time |
+| Planning, control | ❌ not implemented | Phases 7-9 |
 | Fault scenario timeline (Cases A-F) | ❌ not implemented | Phase 10 — the runtime knobs exist, the scheduler does not |
 
 

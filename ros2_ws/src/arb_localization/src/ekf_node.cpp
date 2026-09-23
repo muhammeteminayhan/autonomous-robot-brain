@@ -63,7 +63,7 @@ using EKF = ExtendedKalmanFilter;
 /// that every sensor is fused against the state at the moment it measured.
 struct BufferedMeasurement
 {
-  enum class Type { kWheelTwist, kGyro };
+  enum class Type { kWheelTwist, kGyro, kAbsolutePose };
 
   double stamp{0.0};
   Type type{Type::kWheelTwist};
@@ -78,6 +78,12 @@ struct BufferedMeasurement
   // gyro
   double yaw_rate{0.0};
   double sigma{0.0};
+
+  // absolute pose from scan matching
+  double pose_x{0.0};
+  double pose_y{0.0};
+  double pose_theta{0.0};
+  Eigen::Matrix3d pose_covariance{Eigen::Matrix3d::Identity()};
 };
 
 class EkfNode : public rclcpp::Node
@@ -102,6 +108,29 @@ public:
       static_cast<int>(declare_parameter("gating.max_consecutive_rejections", 25));
     cfg.max_predict_dt = declare_parameter("max_predict_dt", 0.5);
 
+    // Where the robot starts, in the MAP frame.
+    //
+    // WHY THIS PARAMETER MUST EXIST
+    // The map frame has no absolute anchor. Nothing the robot senses tells it
+    // where the world's origin is: wheel encoders and a gyroscope measure only
+    // CHANGE. Initialising the filter at the first odometry reading therefore
+    // puts the map's origin wherever the robot happened to switch on, and the
+    // whole map is then offset by however far that was from the world origin.
+    //
+    // Measured: with the robot spawned at (-8.5, 0), every estimate came out
+    // 8.48 m from the truth and the occupancy grid built from those estimates
+    // scored a precision of 0.308 against the known floor plan -- not because
+    // the mapping was wrong, but because the entire map was shifted by the
+    // spawn offset.
+    //
+    // Real robots solve this the same way: you tell them where they are. AMCL
+    // takes an initial pose estimate, a docking station defines one, a
+    // fiducial marker provides one. That is not a pose measurement during
+    // operation and it is not ground truth; it is the anchor that makes the
+    // map frame mean anything at all.
+    initial_x_ = declare_parameter("initial.x", 0.0);
+    initial_y_ = declare_parameter("initial.y", 0.0);
+    initial_yaw_ = declare_parameter("initial.yaw", 0.0);
     initial_bias_sigma_ = declare_parameter("initial.gyro_bias_sigma", 0.01);
     initial_pose_sigma_ = declare_parameter("initial.pose_sigma", 0.05);
     initial_twist_sigma_ = declare_parameter("initial.twist_sigma", 0.10);
@@ -136,6 +165,15 @@ public:
     imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
       declare_parameter("imu_topic", std::string("/arb/imu")), qos,
       [this](sensor_msgs::msg::Imu::ConstSharedPtr m) {onImu(*m);});
+
+    use_scan_match_ = declare_parameter("use_scan_match", true);
+    scan_match_sub_ =
+      create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+      declare_parameter("scan_match_topic", std::string("/arb/scan_match_pose")),
+      qos,
+      [this](geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr m) {
+        onScanMatch(*m);
+      });
 
     pose_pub_ = create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
       declare_parameter("pose_topic", std::string("/arb/pose")), qos);
@@ -229,10 +267,13 @@ private:
       // chi-square gate can lock itself into a wrong state: every correct
       // measurement looks like an outlier and is rejected. Starting at the
       // first measurement makes the gate a guard rather than a trap.
+      // The POSE comes from the configured anchor; the TWIST comes from the
+      // measurement, because the twist is something the robot can actually
+      // sense and the pose is not.
       EKF::StateVector s = EKF::StateVector::Zero();
-      s(EKF::X) = last_odom_pose_.x;
-      s(EKF::Y) = last_odom_pose_.y;
-      s(EKF::THETA) = last_odom_pose_.theta;
+      s(EKF::X) = initial_x_;
+      s(EKF::Y) = initial_y_;
+      s(EKF::THETA) = arb_core::normalizeAngle(initial_yaw_);
       s(EKF::V) = msg.twist.twist.linear.x;
       s(EKF::OMEGA) = msg.twist.twist.angular.z;
 
@@ -248,8 +289,12 @@ private:
       filter_time_ = stamp;
       initialised_ = true;
       RCLCPP_INFO(
-        get_logger(), "EKF initialised at (%.3f, %.3f, %.1f deg) from odometry",
-        s(EKF::X), s(EKF::Y), s(EKF::THETA) * 180.0 / M_PI);
+        get_logger(),
+        "EKF initialised at (%.3f, %.3f, %.1f deg) in the map frame; "
+        "odometry started at (%.3f, %.3f, %.1f deg)",
+        s(EKF::X), s(EKF::Y), s(EKF::THETA) * 180.0 / M_PI,
+        last_odom_pose_.x, last_odom_pose_.y,
+        last_odom_pose_.theta * 180.0 / M_PI);
       return;
     }
 
@@ -331,16 +376,55 @@ private:
   {
     if (!advanceTo(m.stamp)) {return;}
     EKF::UpdateResult r;
-    if (m.type == BufferedMeasurement::Type::kWheelTwist) {
-      r = filter_->updateWheelTwist(m.v, m.omega, m.sigma_v, m.sigma_omega);
-      ++odom_count_;
-      if (!r.accepted) {++odom_rejected_;}
-    } else {
-      r = filter_->updateGyro(m.yaw_rate, m.sigma);
-      ++imu_count_;
-      if (!r.accepted) {++imu_rejected_;}
+    switch (m.type) {
+      case BufferedMeasurement::Type::kWheelTwist:
+        r = filter_->updateWheelTwist(m.v, m.omega, m.sigma_v, m.sigma_omega);
+        ++odom_count_;
+        if (!r.accepted) {++odom_rejected_;}
+        break;
+      case BufferedMeasurement::Type::kGyro:
+        r = filter_->updateGyro(m.yaw_rate, m.sigma);
+        ++imu_count_;
+        if (!r.accepted) {++imu_rejected_;}
+        break;
+      case BufferedMeasurement::Type::kAbsolutePose:
+        r = filter_->updateAbsolutePose(
+          arb_core::Pose2D(m.pose_x, m.pose_y, m.pose_theta), m.pose_covariance);
+        ++scan_match_count_;
+        if (!r.accepted) {++scan_match_rejected_;}
+        break;
     }
     recordUpdate(r, m.stamp, m.ros_stamp);
+  }
+
+  void onScanMatch(const geometry_msgs::msg::PoseWithCovarianceStamped & msg)
+  {
+    if (!use_scan_match_ || !initialised_) {return;}
+    ++scan_match_received_;
+
+    // This is the ONLY absolute measurement in the whole stack. Everything
+    // else -- encoders, gyroscope -- measures change, so without this the
+    // position error can only grow. Phase 6 measured the cost: after 82 m the
+    // map was structurally right and rotated several degrees.
+    const double stamp = rclcpp::Time(msg.header.stamp).seconds();
+
+    BufferedMeasurement m;
+    m.stamp = stamp;
+    m.type = BufferedMeasurement::Type::kAbsolutePose;
+    m.ros_stamp = msg.header.stamp;
+    m.pose_x = msg.pose.pose.position.x;
+    m.pose_y = msg.pose.pose.position.y;
+    const auto & q = msg.pose.pose.orientation;
+    m.pose_theta = std::atan2(2.0 * (q.w * q.z + q.x * q.y),
+                              1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+    m.pose_covariance = Eigen::Matrix3d::Zero();
+    m.pose_covariance(0, 0) = std::max(
+      msg.pose.covariance[0], min_sigma_ * min_sigma_);
+    m.pose_covariance(1, 1) = std::max(
+      msg.pose.covariance[7], min_sigma_ * min_sigma_);
+    m.pose_covariance(2, 2) = std::max(
+      msg.pose.covariance[35], min_sigma_ * min_sigma_);
+    enqueue(m);
   }
 
   void recordUpdate(const EKF::UpdateResult & r, double stamp,
@@ -365,10 +449,41 @@ private:
     // measurements must still be fused rather than waiting for an arrival that
     // never comes.
     drain();
-    const auto pose = filter_->pose();
-    const auto P = filter_->covariance();
 
+    // The published estimate is a COPY of the filter, predicted forward to the
+    // current time; the filter itself stays at the last fused measurement.
+    //
+    // WHY BOTH
+    // Fusion has to happen in timestamp order, which means holding
+    // measurements until every sensor from that instant has arrived. The
+    // slowest of them is the scan matcher: it must wait for a scan, look up a
+    // transform, and run a coarse-to-fine search, so its result carries a
+    // timestamp several hundred milliseconds old by the time it is published.
+    // Sizing the buffer for it is correct for FUSION and unacceptable for
+    // CONTROL -- an estimate 350 ms stale is 12 cm of position error at
+    // 0.35 m/s, handed to a controller as if it were current.
+    //
+    // Predicting a copy forward separates the two: the filter fuses in order
+    // and the controller gets an estimate valid now. The prediction adds
+    // uncertainty rather than hiding the gap, which is exactly what the
+    // covariance is for.
+    //
+    // Measured before this existed: every one of 611 scan-match corrections
+    // was discarded as out of order, and the only absolute measurement in the
+    // stack was silently doing nothing.
+    EKF published = *filter_;
     builtin_interfaces::msg::Time stamp = last_update_stamp_;
+    const double now = now_seconds();
+    if (now > filter_time_) {
+      const double lead = now - filter_time_;
+      if (published.predict(lead)) {
+        stamp = rclcpp::Time(
+          static_cast<int64_t>(now * 1e9), get_clock()->get_clock_type());
+        last_publish_lead_ms_ = lead * 1e3;
+      }
+    }
+    const auto pose = published.pose();
+    const auto P = published.covariance();
 
     tf2::Quaternion q;
     q.setRPY(0.0, 0.0, pose.theta);
@@ -401,8 +516,8 @@ private:
     arb_msgs::msg::EkfDiagnostics diag;
     diag.header.stamp = stamp;
     diag.header.frame_id = map_frame_;
-    diag.state.assign(filter_->state().data(),
-                      filter_->state().data() + EKF::kStateDim);
+    diag.state.assign(published.state().data(),
+                      published.state().data() + EKF::kStateDim);
     diag.covariance_diagonal.resize(EKF::kStateDim);
     for (int i = 0; i < EKF::kStateDim; ++i) {
       diag.covariance_diagonal[i] = P(i, i);
@@ -451,15 +566,18 @@ private:
       get_logger(),
       "EKF: pose=(%.3f, %.3f, %.1f deg) v=%.3f w=%.3f bias=%.5f rad/s | "
       "1-sigma pos=%.3f m heading=%.2f deg | odom %lu/%lu fused (%lu gated) "
-      "imu %lu/%lu fused (%lu gated) | buffered %zu out-of-order %lu "
-      "predict-rejected %lu overflow %lu",
+      "imu %lu/%lu fused (%lu gated) | scan-match %lu/%lu fused (%lu gated) | "
+      "buffered %zu out-of-order %lu predict-rejected %lu overflow %lu | "
+      "publish lead %.0f ms",
       filter_->pose().x, filter_->pose().y, filter_->pose().theta * 180.0 / M_PI,
       filter_->linearVelocity(), filter_->angularVelocity(), filter_->gyroBias(),
       std::sqrt(std::max(0.0, P(EKF::X, EKF::X) + P(EKF::Y, EKF::Y))),
       std::sqrt(std::max(0.0, P(EKF::THETA, EKF::THETA))) * 180.0 / M_PI,
       odom_count_, odom_received_, odom_rejected_,
       imu_count_, imu_received_, imu_rejected_,
-      buffer_.size(), out_of_order_, predict_rejected_, buffer_overflow_);
+      scan_match_count_, scan_match_received_, scan_match_rejected_,
+      buffer_.size(), out_of_order_, predict_rejected_, buffer_overflow_,
+      last_publish_lead_ms_);
   }
 
   static constexpr double kUnobserved = 1e6;
@@ -478,6 +596,9 @@ private:
   bool use_imu_{true};
   double publish_rate_hz_{50.0};
   double min_sigma_{1e-4};
+  double initial_x_{0.0};
+  double initial_y_{0.0};
+  double initial_yaw_{0.0};
   double initial_bias_sigma_{0.01};
   double initial_pose_sigma_{0.05};
   double initial_twist_sigma_{0.10};
@@ -489,6 +610,7 @@ private:
   EKF::UpdateResult last_update_;
   builtin_interfaces::msg::Time last_update_stamp_;
   double last_measurement_age_ms_{0.0};
+  double last_publish_lead_ms_{0.0};
 
   std::multimap<double, BufferedMeasurement> buffer_;
   double buffer_delay_{0.06};
@@ -496,6 +618,11 @@ private:
   double newest_stamp_{0.0};
   unsigned long buffer_overflow_{0};
 
+  bool use_scan_match_{true};
+  rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
+    scan_match_sub_;
+  unsigned long scan_match_received_{0}, scan_match_count_{0},
+    scan_match_rejected_{0};
   unsigned long odom_received_{0}, odom_count_{0}, odom_rejected_{0};
   unsigned long imu_received_{0}, imu_count_{0}, imu_rejected_{0};
   unsigned long out_of_order_{0}, predict_rejected_{0};

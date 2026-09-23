@@ -1,0 +1,18 @@
+{
+  "tag": "nominal",
+  "duration_s": 260.0,
+  "cells": 172800,
+  "resolution_m": 0.05000000074505806,
+  "tolerance_cells": 1,
+  "occupied_cells": 6765,
+  "free_cells": 106448,
+  "unknown_cells": 59255,
+  "explored_fraction": 0.6570891203703704,
+  "occupied_precision": 0.2771618625277162,
+  "occupied_recall": 0.27340332458442695,
+  "occupied_f1": 0.27526976436908174,
+  "free_accuracy": 0.943517454878215,
+  "false_positive_cells": 4890,
+  "false_negative_cells": 4983,
+  "path_length_m": 82.14457300872512
+}

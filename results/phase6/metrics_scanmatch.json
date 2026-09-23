@@ -1,0 +1,18 @@
+{
+  "tag": "scanmatch",
+  "duration_s": 260.0,
+  "cells": 172800,
+  "resolution_m": 0.05000000074505806,
+  "tolerance_cells": 1,
+  "occupied_cells": 6071,
+  "free_cells": 105963,
+  "unknown_cells": 60393,
+  "explored_fraction": 0.6505034722222223,
+  "occupied_precision": 0.5030472739252182,
+  "occupied_recall": 0.4364727740460197,
+  "occupied_f1": 0.4674012855831037,
+  "free_accuracy": 0.9494012793509634,
+  "false_positive_cells": 3017,
+  "false_negative_cells": 3943,
+  "path_length_m": 80.10794685277014
+}

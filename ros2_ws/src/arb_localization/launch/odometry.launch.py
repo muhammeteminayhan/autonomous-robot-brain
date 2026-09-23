@@ -18,9 +18,10 @@ from __future__ import annotations
 
 import os
 
+import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -28,13 +29,83 @@ from launch_ros.actions import Node
 PKG = "arb_localization"
 
 
+def _launch_setup(context, *args, **kwargs):
+    """Resolve the initial pose by name from the shared floor plan.
+
+    The map frame has no absolute anchor: encoders and a gyroscope measure
+    change, never position. Something has to tell the robot where it starts,
+    and taking it from the same named pose the simulator spawns at keeps the
+    two from drifting apart. On hardware this is the AMCL initial pose, a
+    docking station, or a fiducial.
+    """
+    params = LaunchConfiguration("params").perform(context)
+    use_sim_time = LaunchConfiguration("use_sim_time").perform(context) == "true"
+    publish_tf = LaunchConfiguration("publish_tf").perform(context) == "true"
+    run_ekf = LaunchConfiguration("ekf").perform(context) == "true"
+    use_imu = LaunchConfiguration("ekf_use_imu").perform(context) == "true"
+    run_matcher = LaunchConfiguration("scan_match").perform(context) == "true"
+    spawn_name = LaunchConfiguration("initial_pose").perform(context)
+
+    world_cfg = yaml.safe_load(
+        open(os.path.join(
+            get_package_share_directory("arb_description"), "config", "world.yaml"))
+    )["world"]
+    poses = world_cfg["poses"]
+    if spawn_name not in poses:
+        raise RuntimeError(
+            f"initial_pose '{spawn_name}' not found in world.yaml; "
+            f"available: {sorted(poses)}")
+    start = poses[spawn_name]
+
+    actions = [
+        Node(
+            package=PKG,
+            executable="wheel_odometry_node",
+            name="wheel_odometry",
+            output="screen",
+            parameters=[
+                params,
+                {"use_sim_time": use_sim_time, "publish_tf": publish_tf},
+            ],
+        ),
+    ]
+    if run_ekf:
+        actions.append(
+            Node(
+                package=PKG,
+                executable="ekf_node",
+                name="ekf",
+                output="screen",
+                parameters=[
+                    params,
+                    {
+                        "use_sim_time": use_sim_time,
+                        "use_imu": use_imu,
+                        "initial.x": float(start["x"]),
+                        "initial.y": float(start["y"]),
+                        "initial.yaw": float(start["yaw"]),
+                        "use_scan_match": run_matcher,
+                    },
+                ],
+            )
+        )
+    if run_matcher:
+        actions.append(
+            Node(
+                package=PKG,
+                executable="scan_matcher_node",
+                name="scan_matcher",
+                output="screen",
+                parameters=[params, {"use_sim_time": use_sim_time}],
+            )
+        )
+    return actions
+
+
 def generate_launch_description() -> LaunchDescription:
     default_params = os.path.join(
         get_package_share_directory(PKG), "config", "localization.yaml"
     )
-    params = LaunchConfiguration("params")
-    use_sim_time = LaunchConfiguration("use_sim_time")
-    publish_tf = LaunchConfiguration("publish_tf")
 
     return LaunchDescription([
         DeclareLaunchArgument("params", default_value=default_params),
@@ -59,28 +130,17 @@ def generate_launch_description() -> LaunchDescription:
             description="Let the EKF fuse the gyroscope. Set false to isolate "
                         "the contribution of the IMU in an ablation.",
         ),
-        Node(
-            package=PKG,
-            executable="wheel_odometry_node",
-            name="wheel_odometry",
-            output="screen",
-            parameters=[
-                params,
-                {"use_sim_time": use_sim_time, "publish_tf": publish_tf},
-            ],
+        DeclareLaunchArgument(
+            "scan_match", default_value="true",
+            description="Match scans against the map and feed the result to "
+                        "the EKF as an absolute pose. Set false to see what "
+                        "dead reckoning alone does to the map.",
         ),
-        Node(
-            package=PKG,
-            executable="ekf_node",
-            name="ekf",
-            output="screen",
-            parameters=[
-                params,
-                {
-                    "use_sim_time": use_sim_time,
-                    "use_imu": LaunchConfiguration("ekf_use_imu"),
-                },
-            ],
-            condition=IfCondition(LaunchConfiguration("ekf")),
+        DeclareLaunchArgument(
+            "initial_pose", default_value="spawn",
+            description="Named pose from configs/world.yaml where the robot "
+                        "starts. Anchors the map frame; must match the "
+                        "simulator's spawn argument.",
         ),
+        OpaqueFunction(function=_launch_setup),
     ])

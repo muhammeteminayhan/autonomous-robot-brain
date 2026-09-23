@@ -120,6 +120,12 @@
     publish_rate_hz: 50.0
 
     use_imu: true
+    # The only ABSOLUTE measurement in the stack. Everything else measures
+    # change, so without this the position error can only grow: Phase 6
+    # measured a map that was structurally correct and rotated several degrees
+    # after 82 m of exploration.
+    use_scan_match: true
+    scan_match_topic: "/arb/scan_match_pose"
 
     # --- process noise ---
     # These are the 1-sigma of the DRIVING DISTURBANCE, not of the state, and
@@ -202,5 +208,82 @@
     # exceed the spread in arrival times (one 20 ms odometry period); 60 ms
     # gives three periods of margin. The cost is exactly that much lag in the
     # published estimate.
-    measurement_buffer_delay_s: 0.06
+    # Sized for the SLOWEST measurement, which is the scan matcher: it waits
+    # for a scan, looks up a transform and runs a coarse-to-fine search, so its
+    # result is several hundred milliseconds old by the time it is published.
+    # At 0.06 s every one of 611 scan-match corrections was discarded as out of
+    # order and the stack's only absolute measurement did nothing at all.
+    #
+    # The lag this adds costs nothing downstream: the node publishes a COPY of
+    # the filter predicted forward to the current time, so fusion happens in
+    # order while the controller still receives an estimate valid now.
+    measurement_buffer_delay_s: 0.35
     measurement_buffer_max: 2000
+
+/**/scan_matcher:
+  ros__parameters:
+    map_topic: "/arb/map"
+    scan_topic: "/arb/scan"
+    output_topic: "/arb/scan_match_pose"
+    map_frame: "map"
+    lidar_frame: "lidar_link"
+    base_frame: "base_link"
+    tf_timeout_s: 0.15
+
+    # --- likelihood field ---
+    # Scoring a pose by "is the cell under each endpoint occupied?" gives a
+    # surface that is flat everywhere and jumps at cell boundaries: there is no
+    # gradient to follow and a pose 2 cm out scores the same as one 2 m out.
+    # Replacing it with exp(-d^2 / 2 sigma^2) makes the surface continuous and
+    # peaked, which is what makes any search work.
+    #
+    # sigma is the width of that basin. Too small and the field is a set of
+    # needles the search steps over; too large and every pose scores alike.
+    # 0.15 m is three cells at the map's 5 cm resolution.
+    field_sigma_m: 0.15
+    field_max_distance_m: 0.75
+    occupied_threshold: 65
+    # Matching against a nearly empty map is worse than not matching at all:
+    # a handful of obstacles is a weak, ambiguous constraint and the
+    # best-scoring pose can be anywhere.
+    min_map_obstacles: 400
+
+    # --- search ---
+    # Coarse-to-fine, exhaustive within the window. Not Gauss-Newton or ICP:
+    # gradient methods converge to whichever basin they start in, and in a
+    # corridor the basin along the corridor axis is nearly flat, so they slide
+    # along it. An exhaustive search either finds the optimum inside its window
+    # or reports a low score; it has no mode where it confidently returns the
+    # wrong answer.
+    #
+    # One pass at 1 cm over +-0.4 m and +-10 deg would be 256 000 candidates;
+    # coarse-then-fine reaches the same resolution in about 3 000.
+    coarse:
+      linear_window_m: 0.30
+      linear_step_m: 0.05
+      angular_window_rad: 0.12      # ~7 deg
+      angular_step_rad: 0.02        # ~1.1 deg
+    fine:
+      linear_window_m: 0.06
+      linear_step_m: 0.01
+      angular_window_rad: 0.025
+      angular_step_rad: 0.004
+
+    point_stride: 2
+    min_points: 60
+    match_period_s: 0.4
+
+    # --- acceptance ---
+    # A low score means the scan did not settle onto the map, and feeding that
+    # pose to the filter is worse than feeding nothing: a bad correction moves
+    # the estimate, which makes the next scan fit even worse.
+    min_score: 0.35
+    min_improvement: -0.02
+
+    # --- reported uncertainty ---
+    # Floored deliberately. The map was built from the same estimate this node
+    # corrects, so a perfect match proves the scan agrees with the robot's own
+    # beliefs, not with the world. A filter told otherwise would drive its
+    # uncertainty to zero on self-referential evidence.
+    position_sigma_m: 0.05
+    heading_sigma_rad: 0.02

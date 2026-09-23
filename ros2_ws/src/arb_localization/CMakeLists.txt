@@ -26,6 +26,7 @@ find_package(tf2_geometry_msgs REQUIRED)
 add_library(${PROJECT_NAME}_core SHARED
   src/differential_drive_odometry.cpp
   src/ekf.cpp
+  src/scan_matcher.cpp
 )
 target_include_directories(${PROJECT_NAME}_core PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
@@ -43,7 +44,13 @@ ament_target_dependencies(ekf_node
   rclcpp sensor_msgs geometry_msgs nav_msgs arb_msgs arb_core
   tf2 tf2_ros tf2_geometry_msgs)
 
-install(TARGETS wheel_odometry_node ekf_node DESTINATION lib/${PROJECT_NAME})
+add_executable(scan_matcher_node src/scan_matcher_node.cpp)
+target_link_libraries(scan_matcher_node ${PROJECT_NAME}_core)
+ament_target_dependencies(scan_matcher_node
+  rclcpp sensor_msgs geometry_msgs nav_msgs arb_core tf2 tf2_ros tf2_geometry_msgs)
+
+install(TARGETS wheel_odometry_node ekf_node scan_matcher_node
+  DESTINATION lib/${PROJECT_NAME})
 
 install(TARGETS ${PROJECT_NAME}_core
   EXPORT export_${PROJECT_NAME}
@@ -65,6 +72,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_ekf test/test_ekf.cpp)
   target_link_libraries(test_ekf ${PROJECT_NAME}_core)
+
+  ament_add_gtest(test_scan_matcher test/test_scan_matcher.cpp)
+  target_link_libraries(test_scan_matcher ${PROJECT_NAME}_core)
 endif()
 
 ament_export_include_directories(include)

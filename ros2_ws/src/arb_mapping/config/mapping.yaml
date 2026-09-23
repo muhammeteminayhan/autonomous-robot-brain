@@ -1,0 +1,77 @@
+# =============================================================================
+# Occupancy grid mapping.
+# =============================================================================
+
+/**/mapping:
+  ros__parameters:
+    scan_topic: "/arb/scan"
+    map_topic: "/arb/map"
+    map_frame: "map"
+    # The sensor pose is looked up from TF at the SCAN's timestamp, so tf2
+    # interpolates between the transforms bracketing it. Taking the newest pose
+    # message instead rotates the whole scan by however far the robot turned in
+    # the 50-80 ms the estimate lags, which at 8 m sweeps a beam more than a
+    # metre sideways and paints a starburst of free rays through the walls.
+    #
+    # Using lidar_link rather than base_link also means the mount offset stays
+    # in the URDF instead of being a number this node has to be told.
+    lidar_frame: "lidar_link"
+    tf_timeout_s: 0.15
+
+    # --- grid geometry ---
+    # Covers the whole 20 x 14 m world (configs/world.yaml) with a 2 m margin,
+    # at 5 cm cells: 480 x 360 = 172 800 cells.
+    #
+    # Resolution is a real trade. Too coarse and a doorway (0.9 m here) is a
+    # handful of cells, so the inflation radius in Phase 7 closes it entirely.
+    # Too fine and each scan touches four times as many cells per halving,
+    # while every cell gets fewer observations and the map stays noisy.
+    # 5 cm gives 18 cells across the narrowest gap.
+    resolution_m: 0.05
+    width_m: 24.0
+    height_m: 18.0
+    origin_x_m: -12.0
+    origin_y_m: -9.0
+
+    # --- inverse sensor model ---
+    # "Given that a beam passed through this cell, how likely is it occupied?"
+    # Neither value is 0 or 1: a single measurement can never prove a cell
+    # empty or full, and encoding certainty makes the map unable to change its
+    # mind.
+    #
+    # p_hit > 1 - p_miss deliberately. A beam that STOPPED somewhere says more
+    # about that one cell than a beam that passed through says about each of
+    # the many cells along its path, so a hit is stronger evidence than a miss.
+    p_hit: 0.75
+    p_miss: 0.35
+    p_prior: 0.5
+
+    # --- clamping ---
+    # Bounds the evidence any cell can accumulate, and therefore how long it
+    # takes to forget. Without it a wall seen 500 times reaches a log-odds of
+    # +250, and a door opened in it would need 500 contradicting observations
+    # to register. With these bounds a saturated cell flips in about 10.
+    log_odds_min: -2.0
+    log_odds_max: 3.5
+
+    # --- classification ---
+    # UNKNOWN is not a shade of free. A planner that treats unknown as free
+    # drives confidently through a wall it has never seen; one that treats it
+    # as occupied refuses to explore. Three genuinely different states.
+    occupied_threshold: 0.85    # ~0.70 probability
+    free_threshold: -0.40       # ~0.40 probability
+
+    # --- beam filtering ---
+    # Beams beyond this are treated as "no return": the endpoint is NOT marked
+    # occupied, but the ray still clears what it crossed. A max-range beam
+    # carries real information -- there was nothing in the way -- and
+    # discarding it leaves open floor permanently unknown. Marking its endpoint
+    # occupied instead paints a perfect arc of phantom wall at exactly the
+    # sensor's range limit.
+    #
+    # 10 m rather than the sensor's 12 m: range noise and pose error both grow
+    # with distance, so the furthest returns are the least trustworthy.
+    max_usable_range_m: 10.0
+    min_usable_range_m: 0.15
+
+    publish_period_s: 0.5
