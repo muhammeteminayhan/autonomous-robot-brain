@@ -162,6 +162,33 @@ pytest tests/integration -v # architecture guards
 
 ## Usage
 
+Every shell that talks to the robot needs the same environment. One line does
+it, and it checks the things that silently break a ROS workspace (a non-ASCII
+path, a missing distro, an unbuilt workspace):
+
+```bash
+source scripts/env.sh
+```
+
+It also pins `ROS_DOMAIN_ID=42`. Every pane and every script must agree on that
+or they will not see each other's topics.
+
+The whole stack in one command:
+
+```bash
+ros2 launch arb_bringup bringup.launch.py
+```
+
+```bash
+ros2 launch arb_bringup bringup.launch.py controller:=pid spawn:=control_test
+```
+
+```bash
+ros2 launch arb_bringup bringup.launch.py headless:=true rviz:=false
+```
+
+Or start each stage yourself, which is what the rest of this section does:
+
 ```bash
 source /opt/ros/jazzy/setup.bash
 source ros2_ws/install/setup.bash
