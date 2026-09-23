@@ -5,7 +5,7 @@ Gazebo estimates its own pose from noisy IMU, wheel-encoder and 2D LiDAR data,
 maps its surroundings, plans a collision-free route to a goal, and keeps doing
 so while its sensors are deliberately degraded and failed.
 
-> **Project status: Phases 0-6 of 12 complete and verified.**
+> **Project status: Phases 0-7 of 12 complete and verified.**
 > A six-state EKF fuses wheel odometry, the IMU gyroscope and LiDAR scan
 > matching against a map the robot builds itself. Against ground truth over a
 > 10 m route it cuts position RMSE by **68 %** and heading RMSE by **61 %**
@@ -255,6 +255,20 @@ See what dead reckoning alone does to the map:
 ros2 launch arb_localization odometry.launch.py scan_match:=false
 ```
 
+Plan a path, and benchmark every heuristic on the map the robot built:
+
+```bash
+ros2 launch arb_planning planning.launch.py
+```
+
+```bash
+ros2 topic pub --once /arb/goal geometry_msgs/msg/PoseStamped "{header: {frame_id: map}, pose: {position: {x: 7.0, y: 5.0}, orientation: {w: 1.0}}}"
+```
+
+```bash
+ros2 run arb_planning planner_benchmark
+```
+
 Regenerate the world after editing `configs/world.yaml`:
 
 ```bash
@@ -414,6 +428,40 @@ rather than with the world. The reported covariance therefore has a floor.
 Breaking that circle needs loop closure and pose-graph optimisation, which is
 out of scope here and listed under limitations.
 
+### Global path planning
+
+A* and Dijkstra share one implementation: setting the heuristic to zero turns
+A* into Dijkstra, because A* *is* Dijkstra told which direction the goal is in.
+
+The tight admissible heuristic for an 8-connected grid is the octile distance,
+`(sqrt(2)-1)*min(dx,dy) + max(dx,dy)`, which equals the true cost on an empty
+grid. Manhattan is the common trap: correct for a 4-connected grid, and
+**inadmissible** with diagonals, where it claims `2d` for a pure diagonal whose
+true cost is `1.41d`. Over an 18-instance sweep it was suboptimal on 10 of
+them, worst case 8.9 % longer — and found the optimum on the other 8, which is
+what makes it hard to notice.
+
+Twelve queries generated from the map the robot built, median of five runs:
+
+| Algorithm | Heuristic | Weight | Length [m] | Time [ms] | Expanded | Excess |
+|---|---|---|---|---|---|---|
+| Dijkstra | none | 1.0 | 13.211 | 6.764 | 45 836 | 0.00 % |
+| A* | euclidean | 1.0 | 13.211 | 2.691 | 13 171 | 0.00 % |
+| **A*** | **octile** | **1.0** | **13.211** | **2.812** | **10 947** | **0.00 %** |
+| A* | manhattan | 1.0 | 13.174 | 1.658 | 6 573 | +1.30 % |
+| A* | octile | 2.0 | 13.322 | 0.959 | 3 896 | +13.99 % |
+| A* | octile | 5.0 | 13.544 | 0.669 | 2 847 | +47.00 % |
+
+A* expands **4.2x fewer nodes than Dijkstra** for an identical path. Octile
+expands 17 % fewer than Euclidean as its tightness predicts — but generates
+more, and the wall-clock is a wash: expansions are the algorithmic metric, time
+is the engineering one, and they do not always agree.
+
+Obstacles are inflated by the robot's radius so the planner can treat the robot
+as a point, with a decaying soft cost beyond that to keep paths in the middle
+of a corridor. Full derivation and the details that are not details:
+[docs/path-planning.md](docs/path-planning.md).
+
 ### Topic graph
 
 ```
@@ -448,6 +496,10 @@ out of scope here and listed under limitations.
 
                     arb_localization/scan_matcher
   /arb/map + /arb/scan --> scan_matcher --> /arb/scan_match_pose  2.5 Hz
+
+                            arb_planning
+  /arb/map + /arb/goal + TF --> global_planner --> /arb/global_path     1 Hz
+                                              --> /arb/planner_metrics
 ```
 
 Gazebo and ROS 2 run on separate middlewares. A sensor that is configured
@@ -505,9 +557,10 @@ to work until it has been executed.
 |---|---|---|
 | Environment (ROS 2 Jazzy, Gazebo Sim 8.15.0, g++ 13.3, CMake 3.28, Eigen 3.4) | ✅ verified | `./scripts/check_environment.sh` → *Environment OK* |
 | `colcon build` | ✅ verified | 11/11 packages, zero stderr |
-| Unit tests (`colcon test`) | ✅ verified | **179 tests, 0 failures** |
+| Unit tests (`colcon test`) | ✅ verified | **203 tests, 0 failures** |
 | Integration tests (`pytest tests/integration`) | ✅ verified | **90 passed, 1 skipped** |
 | Unit tests are not vacuous | ✅ verified | 33 deliberate mutations injected across four packages; all caught (9 escaped first and the tests were strengthened) |
+| Planner benchmark | ✅ measured | [results/phase7/planner_benchmark.csv](results/phase7/planner_benchmark.csv) |
 | Ground-truth isolation guard | ✅ verified | passes, and fails correctly when a violation is injected |
 | URDF matches `configs/robot.yaml` | ✅ verified | every dimension compared in `test_urdf_model.py` |
 | Node params match the repo config | ✅ verified | `test_config_consistency.py` (caught one real drift) |
@@ -526,7 +579,12 @@ to work until it has been executed.
 | Occupancy grid vs known floor plan | ✅ measured | precision 0.503, recall 0.436, free-space accuracy 0.949 at one-cell tolerance |
 | Exploration coverage | ✅ measured | 65 % of cells observed over 80 m of wall following |
 | Estimation latency | ✅ measured | median 55 ms; the published estimate is predicted forward to the current time |
-| Planning, control | ❌ not implemented | Phases 7-9 |
+| A* matches Dijkstra's cost | ✅ verified | identical to 1e-9 on every admissible heuristic |
+| A* expands fewer nodes | ✅ measured | **4.2x fewer than Dijkstra** over 12 queries |
+| An inadmissible heuristic loses optimality | ✅ measured | Manhattan suboptimal on 10 of 18 instances, worst 8.9 % |
+| Diagonal moves do not cut corners | ✅ verified | `DiagonalMovesDoNotCutCorners` |
+| Costmap inflation and soft cost | ✅ verified | paths stay within 2 cells of a corridor centreline |
+| Local obstacle avoidance, control | ❌ not implemented | Phases 8-9 |
 | Fault scenario timeline (Cases A-F) | ❌ not implemented | Phase 10 — the runtime knobs exist, the scheduler does not |
 
 

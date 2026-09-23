@@ -1,0 +1,65 @@
+# =============================================================================
+# Global path planning.
+# =============================================================================
+
+/**/global_planner:
+  ros__parameters:
+    map_topic: "/arb/map"
+    goal_topic: "/arb/goal"
+    path_topic: "/arb/global_path"
+    metrics_topic: "/arb/planner_metrics"
+    map_frame: "map"
+    base_frame: "base_link"
+
+    # --- heuristic ---
+    # "octile" | "euclidean" | "manhattan" | "dijkstra"
+    #
+    # Octile is the TIGHT admissible heuristic for an 8-connected grid:
+    #   (sqrt(2) - 1) * min(dx, dy) + max(dx, dy)
+    # which is exactly the true cost on an empty grid, so A* expands almost
+    # nothing there.
+    #
+    # Euclidean is admissible but looser, so it expands more for the same
+    # answer. Manhattan is INADMISSIBLE with diagonal moves -- it claims 2d for
+    # a pure diagonal whose true cost is 1.41d -- and A* with it returns paths
+    # that are plausible and not shortest. Measured over an 18-instance sweep:
+    # suboptimal on 10 of them, worst case 8.9 % longer than necessary.
+    heuristic: "octile"
+
+    # 1.0 is admissible. Above it, weighted A* returns a path at most `weight`
+    # times optimal and gets there faster -- a trade worth making explicit
+    # rather than hiding inside the heuristic choice.
+    heuristic_weight: 1.0
+
+    # --- costmap ---
+    lethal_threshold: 65
+
+    # Unknown cells are impassable. Treating them as free lets the planner
+    # route confidently through space it has never observed; treating them as
+    # lethal stops it leaving the region it has mapped. Neither is right in
+    # general, which is why this is a parameter.
+    unknown_is_lethal: true
+
+    # Obstacles are grown by the robot's radius so the planner can treat the
+    # robot as a POINT. Planning for a point in an inflated world is exactly
+    # equivalent to planning for a disc in the real one, and far cheaper than
+    # checking a footprint at every cell.
+    #
+    # The robot's circumscribed radius is half the chassis diagonal,
+    # sqrt(0.40^2 + 0.30^2)/2 = 0.25 m; 0.28 m adds 3 cm of margin. The
+    # narrowest doorway in the world is 0.90 m wide, which leaves 0.34 m of
+    # free corridor through it -- tight, and deliberately so.
+    inflation_radius_m: 0.28
+
+    # Beyond the lethal band, a decaying cost that keeps paths in the middle of
+    # a corridor. Without it the shortest path hugs every wall, which leaves
+    # the local planner no room and turns any control error into a collision.
+    cost_decay_radius_m: 0.55
+    cost_scaling: 12.0
+    max_soft_cost: 2.5
+
+    allow_diagonal: true
+    max_expansions: 2000000
+
+    replan_period_s: 1.0
+    goal_tolerance_m: 0.25

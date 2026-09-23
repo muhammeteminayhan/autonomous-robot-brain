@@ -1,0 +1,18 @@
+{
+  "tag": "forplanning",
+  "duration_s": 230.0,
+  "cells": 172800,
+  "resolution_m": 0.05000000074505806,
+  "tolerance_cells": 1,
+  "occupied_cells": 5734,
+  "free_cells": 102502,
+  "unknown_cells": 64286,
+  "explored_fraction": 0.627974537037037,
+  "occupied_precision": 0.8189745378444367,
+  "occupied_recall": 0.7311225284135139,
+  "occupied_f1": 0.7725590194949411,
+  "free_accuracy": 0.9662662200918554,
+  "false_positive_cells": 1038,
+  "false_negative_cells": 1727,
+  "path_length_m": 72.5184411068819
+}

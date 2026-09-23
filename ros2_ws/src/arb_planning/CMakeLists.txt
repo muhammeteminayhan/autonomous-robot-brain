@@ -20,19 +20,40 @@ find_package(arb_core REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 
-# Source files and executables are added phase by phase; see docs/architecture.md
-# for which phase populates this package.
+add_library(${PROJECT_NAME}_core SHARED src/grid_planner.cpp)
+target_include_directories(${PROJECT_NAME}_core PUBLIC
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:include>")
+ament_target_dependencies(${PROJECT_NAME}_core arb_core)
 
-install(DIRECTORY config launch
-  DESTINATION share/${PROJECT_NAME}
-  OPTIONAL
-)
+add_executable(global_planner_node src/global_planner_node.cpp)
+target_link_libraries(global_planner_node ${PROJECT_NAME}_core)
+ament_target_dependencies(global_planner_node
+  rclcpp nav_msgs geometry_msgs arb_msgs arb_core tf2 tf2_ros)
+add_executable(planner_benchmark src/planner_benchmark.cpp)
+target_link_libraries(planner_benchmark ${PROJECT_NAME}_core)
+ament_target_dependencies(planner_benchmark rclcpp nav_msgs arb_core)
+
+install(TARGETS global_planner_node planner_benchmark DESTINATION lib/${PROJECT_NAME})
+
+install(TARGETS ${PROJECT_NAME}_core
+  EXPORT export_${PROJECT_NAME}
+  LIBRARY DESTINATION lib ARCHIVE DESTINATION lib RUNTIME DESTINATION bin)
+install(DIRECTORY include/ DESTINATION include)
+install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_grid_planner test/test_grid_planner.cpp)
+  target_link_libraries(test_grid_planner ${PROJECT_NAME}_core)
 endif()
 
+ament_export_include_directories(include)
+ament_export_targets(export_${PROJECT_NAME})
+ament_export_libraries(${PROJECT_NAME}_core)
+ament_export_dependencies(rclcpp nav_msgs arb_core)
 ament_package()
