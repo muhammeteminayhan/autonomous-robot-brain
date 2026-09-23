@@ -5,14 +5,17 @@ Gazebo estimates its own pose from noisy IMU, wheel-encoder and 2D LiDAR data,
 maps its surroundings, plans a collision-free route to a goal, and keeps doing
 so while its sensors are deliberately degraded and failed.
 
-> **Project status: Phases 0-7 of 12 complete and verified.**
+> **Project status: Phases 0-9 of 12 complete and verified.**
 > A six-state EKF fuses wheel odometry, the IMU gyroscope and LiDAR scan
 > matching against a map the robot builds itself. Against ground truth over a
 > 10 m route it cuts position RMSE by **68 %** and heading RMSE by **61 %**
 > versus wheel odometry alone. The robot explores an unknown 20 x 14 m world by
-> wall following and builds an occupancy grid that is structurally correct and
-> unrotated. 179 unit tests and 90 integration tests pass. Path planning
-> (Phase 7) is next. See
+> wall following, builds an occupancy grid, plans through it with A*, and drives
+> the plan: **16.8 m from the west corridor through a 1.5 m doorway into Room E
+> in 36.5 s, collision-free, arriving 0.30 m from the goal.** Two controllers —
+> a DWA local planner and a pure-pursuit/PID follower — are measured against
+> each other on an identical course. 271 unit tests and 93 integration tests
+> pass. Fault injection (Phase 10) is next. See
 > [Verification status](#verification-status) for exactly what has been run.
 
 ---
@@ -269,6 +272,51 @@ ros2 topic pub --once /arb/goal geometry_msgs/msg/PoseStamped "{header: {frame_i
 ros2 run arb_planning planner_benchmark
 ```
 
+Drive the plan. The two controllers both publish `/cmd_vel`, so exactly one of
+them runs at a time — pick one:
+
+```bash
+ros2 launch arb_planning planning.launch.py local_planner:=true
+```
+
+```bash
+ros2 launch arb_planning planning.launch.py local_planner:=false
+```
+
+```bash
+ros2 launch arb_control control.launch.py
+```
+
+Measure a controller. The reference path is published directly, so the planner
+and the map are out of the loop and what is measured is the controller:
+
+```bash
+python3 scripts/evaluate_navigation.py --mode tracking --controller pid
+```
+
+```bash
+python3 scripts/evaluate_navigation.py --mode tracking --controller dwa
+```
+
+Re-derive every metric and plot from the saved samples, without re-running the
+simulator:
+
+```bash
+python3 scripts/evaluate_navigation.py --mode recompute
+```
+
+Run the whole stack end to end against one goal. `unknown_is_lethal:=false`
+lets the planner route through space the robot has not explored yet, which it
+must from a cold start:
+
+```bash
+ros2 launch arb_planning planning.launch.py local_planner:=true unknown_is_lethal:=false
+```
+
+```bash
+python3 scripts/evaluate_navigation.py --mode goal --goal goal_room_e
+```
+
 Regenerate the world after editing `configs/world.yaml`:
 
 ```bash
@@ -462,6 +510,87 @@ as a point, with a decaying soft cost beyond that to keep paths in the middle
 of a corridor. Full derivation and the details that are not details:
 [docs/path-planning.md](docs/path-planning.md).
 
+### Local obstacle avoidance and control
+
+Two controllers turn the global path into wheel commands, and they are
+**alternatives, not companions** — two publishers on `/cmd_vel` is a robot that
+does neither thing.
+
+* **DWA** searches *velocities*, not positions, so every candidate is by
+  construction reachable within one control period. Obstacles come straight
+  from the live scan, never from the map: the map is at best two seconds old and
+  cannot contain something that has just walked in front of the robot.
+* **Pure pursuit + PID** is the baseline. It tracks the path precisely and has
+  *no* obstacle avoidance at all, which is what makes it the right thing to
+  measure DWA against: without it there is no way to say what avoidance costs.
+
+The safety rule in DWA is not "reject anything whose rollout hits something" —
+that stops a robot with 0.45 m of room dead. It is the **admissible velocity**
+condition, `v <= sqrt(2 d a_max)`: the robot may choose any speed it can still
+stop from. The same condition now applies to the goal, with `d` the arc length
+*remaining along the path*, so the robot arrives instead of overshooting and
+being told to halt.
+
+Both controllers are measured on the same 15.60 m three-cornered course, with
+the robot started **0.6 m off the path on purpose** — that offset is a step
+input, and a step is the only input for which settling time and overshoot have
+agreed definitions.
+
+![Path following, PID vs DWA](results/phase9/trajectory.png)
+
+| metric | PID + pure pursuit | DWA |
+|---|---|---|
+| time | **25.6 s** | 32.0 s |
+| cross-track RMSE (steady) | **0.084 m** | 0.085 m |
+| worst steady error (a corner) | 0.249 m | **0.222 m** |
+| settling time, 0.6 m step | **2.11 s** | 3.55 s |
+| overshoot | 4.24 % | **0.00 %** |
+| command smoothness, angular | 2.514 rad/s² | **0.234 rad/s²** |
+| steering sign changes | 40 | **2** |
+| collision-free | yes | yes |
+
+![Step response](results/phase9/step_response.png)
+
+The two agree on steady-state tracking accuracy to within a millimetre and
+differ enormously everywhere else. PID converges 1.4 s faster with 4 %
+overshoot; DWA converges monotonically with none, and its command stream is
+**11x smoother in the angular channel**. Tracking error alone would call these
+controllers equivalent — nothing in it shows that one of them is sawing at its
+wheels.
+
+Three defects found by running this, none of which any unit test caught first,
+are written up in [docs/control.md](docs/control.md): a carrot measured from
+the path's first vertex instead of the robot's projection onto it (which
+shipped **twice, independently**, in both controllers), a PID differentiating a
+wrapped angle, and a rate limiter anchored to the measured velocity that latched
+the robot at its maximum turn rate for 117 consecutive seconds.
+
+### End-to-end navigation
+
+The whole stack, one goal, no human in the loop: simulator → sensors → EKF +
+scan matching → mapping → A* → DWA → wheels.
+
+![End-to-end navigation to Room E](results/phase9/navigation_goal_room_e.png)
+
+| | `goal_far_east` | `goal_room_e` |
+|---|---|---|
+| arrived (ground truth, 0.30 m) | yes | yes |
+| time | 36.9 s | 36.5 s |
+| distance driven | 16.92 m | 16.77 m |
+| final error | 0.299 m | 0.300 m |
+| EKF error at arrival | 0.084 m | 0.040 m |
+| closest approach to anything | 0.365 m | 0.401 m |
+| collision-free | yes | yes |
+
+Down the corridor swinging south of the pillar at (−7, 0), through the 1.5 m
+doorway at x ∈ [2.0, 3.5], into Room E and around the drum at (5, −4.5). The
+planner runs with `unknown_is_lethal:=false` because the robot has not explored
+the corridor yet, replanning at 1 Hz as the map fills in.
+
+**Arrival accuracy is limited by localisation, not by control.** The stack stops
+when it *believes* it has arrived within 0.20 m; whether it has is a question
+about the EKF.
+
 ### Topic graph
 
 ```
@@ -557,9 +686,9 @@ to work until it has been executed.
 |---|---|---|
 | Environment (ROS 2 Jazzy, Gazebo Sim 8.15.0, g++ 13.3, CMake 3.28, Eigen 3.4) | ✅ verified | `./scripts/check_environment.sh` → *Environment OK* |
 | `colcon build` | ✅ verified | 11/11 packages, zero stderr |
-| Unit tests (`colcon test`) | ✅ verified | **203 tests, 0 failures** |
-| Integration tests (`pytest tests/integration`) | ✅ verified | **90 passed, 1 skipped** |
-| Unit tests are not vacuous | ✅ verified | 33 deliberate mutations injected across four packages; all caught (9 escaped first and the tests were strengthened) |
+| Unit tests (`colcon test`) | ✅ verified | **271 tests, 0 failures** |
+| Integration tests (`pytest tests/integration`) | ✅ verified | **93 passed, 1 skipped** |
+| Unit tests are not vacuous | ✅ verified | 41 deliberate mutations injected across five packages; all caught (10 escaped first and the tests were strengthened; 1 was an equivalent mutant and was removed) |
 | Planner benchmark | ✅ measured | [results/phase7/planner_benchmark.csv](results/phase7/planner_benchmark.csv) |
 | Ground-truth isolation guard | ✅ verified | passes, and fails correctly when a violation is injected |
 | URDF matches `configs/robot.yaml` | ✅ verified | every dimension compared in `test_urdf_model.py` |
@@ -584,8 +713,15 @@ to work until it has been executed.
 | An inadmissible heuristic loses optimality | ✅ measured | Manhattan suboptimal on 10 of 18 instances, worst 8.9 % |
 | Diagonal moves do not cut corners | ✅ verified | `DiagonalMovesDoNotCutCorners` |
 | Costmap inflation and soft cost | ✅ verified | paths stay within 2 cells of a corridor centreline |
-| Local obstacle avoidance, control | ❌ not implemented | Phases 8-9 |
+| DWA makes progress on a path held still | ✅ verified | `Dwa.MakesProgressAlongAPathFixedInTheWorld` — caught a carrot bug that covered 1.99 m of a 15.60 m course |
+| DWA slows for the end of the path | ✅ verified | `v <= sqrt(2 d a)` applied to the goal, distance measured along the path |
+| PID anti-windup and angle-aware derivative | ✅ verified | `Pid.AntiWindupStopsTheIntegralGrowingWhileSaturated`, `Pid.DerivativeOfAWrappedAngleUsesTheAngularDifference` |
+| Commands never leave the velocity limits | ✅ verified | `Follower.CommandsStayInsideTheVelocityLimits`, and `EscapesSaturationEvenWhenThePlantOvershootsTheLimit` reproduces the 11 % plant overshoot that latched the controller for 117 s |
+| Path following, PID | ✅ measured | cross-track RMSE **0.084 m**, settling 2.11 s, overshoot 4.2 %, collision-free ([results/phase9](results/phase9)) |
+| Path following, DWA | ✅ measured | cross-track RMSE **0.085 m**, settling 3.55 s, overshoot **0.0 %**, angular command **11x smoother** |
+| End-to-end navigation to a goal | ✅ measured | 16.8 m in 36.5 s through a doorway, min clearance 0.40 m, final error 0.300 m |
 | Fault scenario timeline (Cases A-F) | ❌ not implemented | Phase 10 — the runtime knobs exist, the scheduler does not |
+| Benchmark sweep (5 experiments) | ❌ not implemented | Phase 11 |
 
 
 ---

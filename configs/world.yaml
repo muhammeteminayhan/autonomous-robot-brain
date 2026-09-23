@@ -111,3 +111,15 @@ world:
     # error it is measuring, so the pose is chosen by maximum clearance rather
     # than by eye.
     odometry_test: { x:  3.0, y: -3.5, yaw: 0.0 }
+
+    # Phase 9's controller benchmark starts here, 0.6 m SOUTH of the reference
+    # path it is asked to follow. The offset is the experiment: a path follower
+    # asked to converge onto a path it is not on is a step-response test, and
+    # settling time and overshoot only mean something against a known step.
+    #
+    # Room B (x in [-3, 3], y in [1.5, 7]) is used rather than the corridor
+    # because a closed rectangle inside it gives four square corners with at
+    # least 0.37 m of wall clearance and 1.45 m to the nearest crate, so the
+    # PID follower -- which has NO obstacle avoidance at all -- is being
+    # measured on tracking, not on luck.
+    control_test:  { x: -2.3, y:  2.2, yaw: 0.0 }

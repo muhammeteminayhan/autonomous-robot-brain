@@ -1,0 +1,68 @@
+# =============================================================================
+# Pure-pursuit path following with PID on the two error channels.
+#
+# The geometric part (pure pursuit) picks WHERE to aim; the PID decides HOW
+# HARD to steer and how fast to go. Pure pursuit alone has no memory, so a
+# systematic bias -- a miscalibrated wheel, a slope, a dragging caster --
+# leaves the robot permanently offset from its path.
+# =============================================================================
+
+/**/controller:
+  ros__parameters:
+    path_topic: "/arb/global_path"
+    odom_topic: "/arb/odom"
+    cmd_topic: "/cmd_vel"
+    diagnostics_topic: "/arb/control_diagnostics"
+    map_frame: "map"
+    base_frame: "base_link"
+    control_rate_hz: 20.0
+
+    # --- linear channel: tracks a target SPEED ---
+    # ki is small but non-zero. Without it the robot settles slightly below its
+    # target speed whenever anything resists -- a slope, caster drag -- because
+    # P commands zero effort at zero error.
+    linear:
+      kp: 1.6
+      ki: 0.35
+      kd: 0.02
+      integral_limit: 0.25        # in OUTPUT units, so it means the same at any ki
+      output_limit: 1.0
+      derivative_filter_tau: 0.05
+
+    # --- angular channel: tracks the bearing to the carrot ---
+    # kd matters more here: heading error changes fast during a turn, and the
+    # damping is what stops the robot weaving across its path.
+    angular:
+      kp: 2.2
+      ki: 0.10
+      kd: 0.12
+      integral_limit: 0.4
+      output_limit: 2.0
+      derivative_filter_tau: 0.05
+
+    # --- pure pursuit ---
+    # Lookahead grows with speed. A fixed value is either too short at speed,
+    # so the robot chases a point it keeps overshooting and weaves, or too long
+    # at rest, so it cuts every corner.
+    lookahead_min_m: 0.35
+    lookahead_gain_s: 0.9
+    lookahead_max_m: 1.2
+
+    # --- limits, mirroring configs/robot.yaml ---
+    max_linear_velocity: 0.70
+    min_linear_velocity: 0.0
+    max_angular_velocity: 2.00
+    max_linear_acceleration: 1.00
+    max_angular_acceleration: 3.00
+
+    # Driving flat out while turning hard is how a differential drive leaves
+    # its path: the cross-track error grows faster than the controller can
+    # correct it.
+    heading_slowdown_gain: 1.4
+
+    # Past this heading error, stop translating and turn on the spot. Arcing
+    # onto a path that is behind the robot is slow and wide, and a differential
+    # drive does not have to.
+    in_place_turn_threshold_rad: 1.0
+
+    goal_tolerance_m: 0.20

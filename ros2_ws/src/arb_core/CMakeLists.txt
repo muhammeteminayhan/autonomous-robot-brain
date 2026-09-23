@@ -34,6 +34,8 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_angles test/test_angles.cpp)
   target_link_libraries(test_angles ${PROJECT_NAME})
+  ament_add_gtest(test_path_geometry test/test_path_geometry.cpp)
+  target_link_libraries(test_path_geometry ${PROJECT_NAME})
 endif()
 
 ament_export_include_directories(include)

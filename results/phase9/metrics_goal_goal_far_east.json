@@ -1,0 +1,23 @@
+{
+  "goal": "goal_far_east",
+  "goal_xy": [
+    8.5,
+    0.0
+  ],
+  "start_xy": [
+    -8.499999999999448,
+    1.9414976730019858e-19
+  ],
+  "arrived": true,
+  "goal_tolerance_m": 0.3,
+  "stopped_itself_short": false,
+  "time_s": 36.86678409576416,
+  "distance_m": 16.917336972182945,
+  "straight_line_m": 16.999999999999446,
+  "path_efficiency": 1.0048862907886993,
+  "final_error_m": 0.2989784131333978,
+  "final_estimate_error_m": 0.08382100534155389,
+  "min_lidar_range_m": 0.36488333344459534,
+  "collision_free": true,
+  "mean_speed_m_s": 0.45857179889873895
+}

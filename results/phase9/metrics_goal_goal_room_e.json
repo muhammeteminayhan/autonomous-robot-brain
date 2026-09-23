@@ -1,0 +1,23 @@
+{
+  "goal": "goal_room_e",
+  "goal_xy": [
+    6.0,
+    -5.5
+  ],
+  "start_xy": [
+    -8.499999999999448,
+    1.9414976730019858e-19
+  ],
+  "arrived": true,
+  "goal_tolerance_m": 0.3,
+  "stopped_itself_short": false,
+  "time_s": 36.52232789993286,
+  "distance_m": 16.769792397671374,
+  "straight_line_m": 15.508062419270306,
+  "path_efficiency": 0.9247617413214806,
+  "final_error_m": 0.2994911567426623,
+  "final_estimate_error_m": 0.039770322040610824,
+  "min_lidar_range_m": 0.4009547829627991,
+  "collision_free": true,
+  "mean_speed_m_s": 0.4583957138370159
+}

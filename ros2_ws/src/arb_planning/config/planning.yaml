@@ -63,3 +63,76 @@
 
     replan_period_s: 1.0
     goal_tolerance_m: 0.25
+
+/**/local_planner:
+  ros__parameters:
+    path_topic: "/arb/global_path"
+    scan_topic: "/arb/scan"
+    odom_topic: "/arb/odom"
+    cmd_topic: "/cmd_vel"
+    map_frame: "map"
+    base_frame: "base_link"
+    control_rate_hz: 20.0
+
+    # --- actuator limits, mirroring configs/robot.yaml ---
+    max_linear_velocity: 0.70
+    min_linear_velocity: -0.30
+    max_angular_velocity: 2.00
+    max_linear_acceleration: 1.00
+    max_angular_acceleration: 3.00
+
+    # --- the velocity sampling grid ---
+    # DWA searches VELOCITIES, not positions, so every candidate is by
+    # construction something the robot can actually do. The window is what it
+    # can reach within ONE control period given its acceleration limits.
+    linear_samples: 9
+    angular_samples: 21
+
+    # The horizon is the most consequential parameter: too short and the robot
+    # cannot see a wall in time, too long and it refuses perfectly safe motion
+    # because something might be in the way eventually.
+    simulation_time: 2.0
+    simulation_dt: 0.1
+
+    # --- objective weights ---
+    # Three terms that pull in different directions, which is the design.
+    # Heading alone drives into walls. Clearance alone parks in the middle of
+    # the largest open space and never leaves. Velocity alone drives flat out
+    # into the first thing it meets.
+    heading_weight: 1.0
+    clearance_weight: 0.7
+    velocity_weight: 0.25
+    path_weight: 1.2
+
+    # The path term scores the distance to a CARROT a fixed arc length along
+    # the path, not to the nearest path point. The path starts at the robot, so
+    # "stay near the path" is maximised by not moving -- measured, and the
+    # best-scoring command was the slowest one available, every cycle.
+    path_lookahead_m: 1.0
+
+    # --- safety ---
+    robot_radius: 0.25
+    max_useful_clearance: 1.2
+    collision_margin: 0.02
+
+    # The admissible-velocity condition: v <= sqrt(2 * dist * a_max).
+    # The robot may choose any speed it can still STOP from before the first
+    # obstacle on that curvature. This is NOT the same as requiring a clear
+    # horizon, which makes a robot with 0.45 m of room at 0.3 m/s find no
+    # admissible command and stop dead.
+    enforce_stopping_distance: true
+
+    # The safety check steps by DISTANCE, not time, so its resolution does not
+    # depend on speed. Stepping by time at 0.66 m/s and 0.1 s jumps 6.6 cm
+    # between checks; measured, that reported 0.265 m of room where there was
+    # 0.20 m.
+    collision_check_step_m: 0.02
+
+    in_place_rotation_speed: 0.05
+
+    # Obstacles come straight from the scan, not the map: the map is at best
+    # two seconds old and cannot contain anything that has just walked in
+    # front of the robot, which is the entire point of a local planner.
+    obstacle_range_m: 3.0
+    obstacle_stride: 3
+    goal_tolerance_m: 0.20

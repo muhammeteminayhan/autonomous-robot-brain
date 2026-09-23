@@ -1,0 +1,41 @@
+{
+  "samples": 601,
+  "duration_s": 31.98980212211609,
+  "distance_m": 14.215160959282667,
+  "course_fraction": 0.9112282666206838,
+  "cross_track_rmse_m": 0.12616481873769797,
+  "cross_track_mean_abs_m": 0.08784882200010026,
+  "cross_track_max_m": 0.5520257949794467,
+  "cross_track_steady_rmse_m": 0.08481630172650631,
+  "cross_track_steady_max_m": 0.2216778607255696,
+  "settling_time_s": 3.5538582801818848,
+  "settling_band_m": 0.05,
+  "settling_window_m": 3.0,
+  "initial_offset_m": 0.5520257949794467,
+  "overshoot_m": 0.0,
+  "overshoot_pct": 0.0,
+  "heading_error_rmse_rad": 0.28550399962255435,
+  "heading_error_steady_rmse_rad": 0.29741615354235934,
+  "heading_error_max_rad": 0.8330217952218354,
+  "smoothness_dv_rms_m_s2": 0.17330111280793092,
+  "smoothness_dw_rms_rad_s2": 0.23419732136800267,
+  "angular_reversals": 2,
+  "localization_error_rmse_m": 0.038890548826802866,
+  "localization_error_max_m": 0.0745366852137755,
+  "mean_speed_m_s": 0.4437952332814087,
+  "max_speed_m_s": 0.5706408164400691,
+  "min_lidar_range_m": 0.4588061273097992,
+  "collision_free": true,
+  "completed_course": true,
+  "course": {
+    "start": [
+      -2.3,
+      2.8
+    ],
+    "width_m": 4.6,
+    "height_m": 3.5,
+    "tail_m": 0.6,
+    "length_m": 15.6,
+    "corners": 3
+  }
+}

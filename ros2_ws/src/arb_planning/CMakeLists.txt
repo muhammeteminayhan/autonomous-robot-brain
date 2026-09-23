@@ -20,7 +20,10 @@ find_package(arb_core REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 
-add_library(${PROJECT_NAME}_core SHARED src/grid_planner.cpp)
+add_library(${PROJECT_NAME}_core SHARED
+  src/grid_planner.cpp
+  src/dynamic_window.cpp
+)
 target_include_directories(${PROJECT_NAME}_core PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
   "$<INSTALL_INTERFACE:include>")
@@ -34,7 +37,13 @@ add_executable(planner_benchmark src/planner_benchmark.cpp)
 target_link_libraries(planner_benchmark ${PROJECT_NAME}_core)
 ament_target_dependencies(planner_benchmark rclcpp nav_msgs arb_core)
 
-install(TARGETS global_planner_node planner_benchmark DESTINATION lib/${PROJECT_NAME})
+add_executable(local_planner_node src/local_planner_node.cpp)
+target_link_libraries(local_planner_node ${PROJECT_NAME}_core)
+ament_target_dependencies(local_planner_node
+  rclcpp nav_msgs geometry_msgs sensor_msgs visualization_msgs arb_core tf2 tf2_ros)
+
+install(TARGETS global_planner_node local_planner_node planner_benchmark
+  DESTINATION lib/${PROJECT_NAME})
 
 install(TARGETS ${PROJECT_NAME}_core
   EXPORT export_${PROJECT_NAME}
@@ -50,6 +59,9 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_grid_planner test/test_grid_planner.cpp)
   target_link_libraries(test_grid_planner ${PROJECT_NAME}_core)
+
+  ament_add_gtest(test_dynamic_window test/test_dynamic_window.cpp)
+  target_link_libraries(test_dynamic_window ${PROJECT_NAME}_core)
 endif()
 
 ament_export_include_directories(include)
