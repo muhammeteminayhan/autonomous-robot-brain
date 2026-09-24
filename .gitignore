@@ -43,3 +43,9 @@ experiments/**/raw/
 # ---- Python venv ----
 .venv/
 venv/
+
+# Phase 11 keeps every sweep run's METRICS (the record) and the aggregate
+# plots, but not the per-run error/trajectory PNGs: there are two per run
+# across ~90 runs, they overwrite each other between seeds of the same level,
+# and every one of them is regenerable from the JSON beside it.
+results/phase11/raw/*.png

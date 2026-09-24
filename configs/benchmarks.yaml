@@ -1,0 +1,109 @@
+# =============================================================================
+# Phase 11 benchmark sweeps.
+#
+# Phase 10 ran each failure mode ONCE, at ONE magnitude. That answered "does
+# this failure mode do what the theory says" and could not answer "how much of
+# it can the estimator take", nor separate an effect from run-to-run variation.
+# Case A's covariance consistency came out at 76 % and Case D's at 92 % purely
+# because they were different runs.
+#
+# These sweeps fix both: every point is REPEATED over seeds and reported as a
+# mean with a spread, and every experiment varies ONE parameter across a range
+# so the shape of the response is visible rather than a single point on it.
+#
+# WHY SEEDS ARE A LAUNCH PARAMETER AND NOT A RUNTIME ONE
+# The sensor noise generators are constructed with their seed. Changing it at
+# runtime would leave the parameter server disagreeing with the running model --
+# the nodes reject the attempt, deliberately -- so each repeat relaunches the
+# stack with an overridden parameter file.
+# =============================================================================
+
+benchmark:
+  # Shorter than Phase 10's 120 s: a sweep is dozens of runs, and at 120 s each
+  # the four estimation experiments alone would take three hours. 75 s is still
+  # two and a half laps of the route, which is enough for dead reckoning to
+  # separate from the filter, and every run here uses the same value so the
+  # comparison within a sweep is unaffected.
+  #
+  # It does mean these numbers are NOT directly comparable with Phase 10's,
+  # because a dead-reckoning error grows with distance travelled.
+  duration_s: 75.0
+
+  # Three repeats is few. It is enough to show a spread and not enough to make
+  # a confident claim about the tail of a distribution, and the report says so
+  # rather than implying otherwise.
+  seeds: [1, 2, 3]
+
+  spawn: "odometry_test"
+
+  experiments:
+
+    # ---------------------------------------------------------------- 1 -----
+    - id: "gyro_noise"
+      title: "Gyroscope noise"
+      description: >
+        How much gyro noise can the filter absorb before it stops beating dead
+        reckoning? Covers both the low-noise and high-noise ends in one sweep,
+        which shows the shape of the response rather than two points on it.
+      parameter: "noise_scale"
+      unit: "x nominal sigma"
+      levels: [0.5, 1.0, 2.0, 5.0, 10.0, 20.0]
+      fault:
+        type: "imu_high_noise"
+        onset_s: 15.0
+        duration_s: 40.0
+        params:
+          affect_accelerometer: false
+
+    # ---------------------------------------------------------------- 2 -----
+    - id: "encoder_bias"
+      title: "One-wheel encoder bias"
+      description: >
+        The experiment Phase 10 could not run. Case C (0.05 rad/s) never
+        recovered and Case F (0.04 rad/s) recovered in 1.4 s, but those two runs
+        differed in more than magnitude and each was a single sample. Sweeping
+        the magnitude alone, repeated over seeds, is what decides whether there
+        is a recovery threshold or whether that was noise.
+      parameter: "bias_rad_s"
+      unit: "rad/s"
+      levels: [0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.07]
+      fault:
+        type: "encoder_drift"
+        onset_s: 15.0
+        duration_s: 40.0
+        params:
+          wheel: "right"
+          ramp_time_s: 5.0
+
+    # ---------------------------------------------------------------- 3 -----
+    - id: "lidar_dropout"
+      title: "LiDAR beam dropout"
+      description: >
+        Phase 10's 60 % dropout was indistinguishable from nominal, because
+        40 % of 360 beams is still 144 and a likelihood field does not need many.
+        This pushes it to where it does matter.
+      parameter: "dropout_ratio"
+      unit: "fraction of beams discarded"
+      levels: [0.0, 0.3, 0.6, 0.8, 0.9, 0.97]
+      fault:
+        type: "lidar_dropout"
+        onset_s: 15.0
+        duration_s: 40.0
+        params:
+          burst_mode: false
+
+    # ---------------------------------------------------------------- 4 -----
+    - id: "lidar_outage"
+      title: "LiDAR outage duration"
+      description: >
+        The LiDAR is the only ABSOLUTE measurement in the stack; everything else
+        is a rate, and rates only say how much things have changed. This sweeps
+        how long the filter can go without one and still come back.
+      parameter: "outage_s"
+      unit: "s"
+      levels: [0.0, 5.0, 10.0, 20.0, 30.0]
+      fault:
+        type: "sensor_outage"
+        onset_s: 20.0
+        params:
+          sensor: "lidar"

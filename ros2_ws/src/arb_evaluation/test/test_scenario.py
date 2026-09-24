@@ -294,6 +294,61 @@ def test_the_stronger_of_two_faults_on_one_knob_wins_not_the_later_one():
         "encoder_preprocessor", "fault.left_bias_rad_s") == pytest.approx(-0.08)
 
 
+def test_a_fault_below_nominal_is_applied_rather_than_clamped_away():
+    """Check that "stronger wins" resolves two FAULTS, not a fault vs nominal.
+
+    THE BUG: the composition started from the nominal knob set and took
+    `max(current, requested)` for every fault, including the first. A fault
+    asking for HALF the datasheet noise therefore came out as `max(1.0, 0.5)`
+    = 1.0 -- identical to a healthy robot, with nothing to indicate it had
+    been ignored.
+
+    Phase 11's gyro sweep runs from 0.5x to 20x precisely to see both ends of
+    the response, and the low end would have measured the healthy robot six
+    times over. Found by generating the sweep's scenarios and reading them
+    before running them; the run would only have shown a flat line.
+    """
+    quieter = {"scenario": {"id": "x", "duration_s": 10.0, "faults": [
+        {"type": "imu_high_noise", "onset_s": 1.0, "duration_s": 5.0,
+         "params": {"noise_scale": 0.5, "affect_accelerometer": True}}]}}
+    k = sc.knobs_at(quieter, 3.0)
+    assert k.get("imu_preprocessor", "fault.noise_scale") == 0.5
+    assert k.get("imu_preprocessor", "fault.accel_noise_scale") == 0.5
+    # And it still clears.
+    assert sc.knobs_at(quieter, 6.0).values == sc.nominal_knobs().values
+
+    # The same for a dropout below nothing-at-all is meaningless, but a bias of
+    # a smaller magnitude than nominal (zero) must still be written, sign and
+    # all -- a negative bias must not be clamped to zero.
+    negative = {"scenario": {"id": "x", "duration_s": 10.0, "faults": [
+        {"type": "encoder_drift", "onset_s": 1.0, "duration_s": 5.0,
+         "params": {"wheel": "left", "bias_rad_s": -0.03}}]}}
+    assert sc.knobs_at(negative, 3.0).get(
+        "encoder_preprocessor", "fault.left_bias_rad_s") == pytest.approx(-0.03)
+
+
+def test_two_faults_still_compose_by_strength_not_by_order():
+    """The rule the fix must not break: between two faults, the stronger wins.
+
+    Written as a pair with the test above because the two pull in opposite
+    directions -- one says "do not compose against nominal", the other says
+    "do compose against another fault" -- and a fix for either that breaks the
+    other would otherwise pass.
+    """
+    for order in (False, True):
+        faults = [
+            {"type": "imu_high_noise", "onset_s": 0.0, "duration_s": 10.0,
+             "params": {"noise_scale": 0.5}},
+            {"type": "imu_high_noise", "onset_s": 0.0, "duration_s": 10.0,
+             "params": {"noise_scale": 8.0}},
+        ]
+        if order:
+            faults.reverse()
+        s = {"scenario": {"id": "x", "duration_s": 10.0, "faults": faults}}
+        assert sc.knobs_at(s, 5.0).get(
+            "imu_preprocessor", "fault.noise_scale") == 8.0
+
+
 def test_an_outage_wins_outright_over_a_noise_fault():
     s = {"scenario": {"id": "x", "duration_s": 10.0, "faults": [
         {"type": "imu_high_noise", "onset_s": 0.0, "duration_s": 10.0,

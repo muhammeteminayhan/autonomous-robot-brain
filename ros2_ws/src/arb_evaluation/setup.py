@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'fault_scheduler = arb_evaluation.fault_scheduler:main',
+            'moving_obstacle = arb_evaluation.moving_obstacle:main',
         ],
     },
 )

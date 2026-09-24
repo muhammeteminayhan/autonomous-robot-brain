@@ -161,6 +161,27 @@ def knobs_at(scenario: dict, t: float) -> Knobs:
     knobs = nominal_knobs()
     s = scenario["scenario"]
 
+    # Which knobs a fault has already written. The "stronger wins" rule below
+    # resolves TWO OVERLAPPING FAULTS; it must not be applied between a fault
+    # and the nominal baseline.
+    #
+    # Composing against nominal silently clamps any fault that asks for LESS
+    # than nominal: `max(1.0, 0.5)` is 1.0, so a sweep point at half the
+    # datasheet noise came out identical to the healthy robot and the
+    # low-noise end of Phase 11's gyro experiment measured nothing. Found by
+    # generating the sweep's scenarios and inspecting them, before running
+    # them -- the run itself would just have produced a flat line.
+    written: set[tuple[str, str]] = set()
+
+    def put(node: str, key: str, value, stronger) -> None:
+        """Write a knob, or compose with what another fault already wrote."""
+        target = knobs.values[node]
+        if (node, key) not in written:
+            written.add((node, key))
+            target[key] = value
+        else:
+            target[key] = stronger(target[key], value)
+
     for fault in s["faults"]:
         onset = float(fault["onset_s"])
         end = onset + float(fault["duration_s"])
@@ -173,25 +194,20 @@ def knobs_at(scenario: dict, t: float) -> Knobs:
 
         if kind == "imu_high_noise":
             scale = float(params.get("noise_scale", 1.0))
-            imu = knobs.values["imu_preprocessor"]
-            imu["fault.noise_scale"] = max(imu["fault.noise_scale"], scale)
+            put("imu_preprocessor", "fault.noise_scale", scale, max)
             if params.get("affect_accelerometer", False):
-                imu["fault.accel_noise_scale"] = max(
-                    imu["fault.accel_noise_scale"], scale)
+                put("imu_preprocessor", "fault.accel_noise_scale", scale, max)
 
         elif kind == "encoder_drift":
             bias = float(params.get("bias_rad_s", 0.0)) * _ramp(
                 elapsed, float(params.get("ramp_time_s", 0.0)))
-            key = f"fault.{params['wheel']}_bias_rad_s"
-            enc = knobs.values["encoder_preprocessor"]
-            if abs(bias) > abs(enc[key]):
-                enc[key] = bias
+            put("encoder_preprocessor", f"fault.{params['wheel']}_bias_rad_s",
+                bias, lambda a, b: a if abs(a) >= abs(b) else b)
 
         elif kind == "lidar_dropout":
             ratio = float(params.get("dropout_ratio", 0.0))
+            put("lidar_preprocessor", "fault.dropout_ratio", ratio, max)
             lidar = knobs.values["lidar_preprocessor"]
-            lidar["fault.dropout_ratio"] = max(
-                lidar["fault.dropout_ratio"], ratio)
             if params.get("burst_mode", False):
                 lidar["fault.burst_mode"] = True
                 # Bursts are a square wave over the fault's own elapsed time,
