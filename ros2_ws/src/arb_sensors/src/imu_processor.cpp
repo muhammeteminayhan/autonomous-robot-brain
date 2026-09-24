@@ -53,7 +53,7 @@ void ImuProcessor::set_fault(const ImuFaultState & fault)
   fault_ = fault;
   for (int i = 0; i < 3; ++i) {
     gyro_[i].set_noise_scale(fault.noise_scale);
-    accel_[i].set_noise_scale(fault.noise_scale);
+    accel_[i].set_noise_scale(fault.accel_noise_scale);
   }
 }
 

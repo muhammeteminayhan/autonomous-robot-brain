@@ -59,6 +59,7 @@ public:
     // sensor with `ros2 param set` and no restart, and so a scenario file can
     // be replayed against a running stack.
     declare_parameter("fault.noise_scale", 1.0);
+    declare_parameter("fault.accel_noise_scale", 1.0);
     declare_parameter("fault.gyro_bias_offset", 0.0);
     declare_parameter("fault.outage", false);
 
@@ -121,6 +122,8 @@ private:
   {
     ImuFaultState fault;
     fault.noise_scale = get_parameter("fault.noise_scale").as_double();
+    fault.accel_noise_scale =
+      get_parameter("fault.accel_noise_scale").as_double();
     fault.gyro_bias_offset = get_parameter("fault.gyro_bias_offset").as_double();
     fault.outage = get_parameter("fault.outage").as_bool();
     processor_->set_fault(fault);
@@ -133,7 +136,17 @@ private:
     result.successful = true;
     ImuFaultState fault = processor_->fault();
     for (const auto & p : params) {
-      if (p.get_name() == "fault.noise_scale") {
+      if (p.get_name() == "fault.accel_noise_scale") {
+        if (p.as_double() < 0.0) {
+          result.successful = false;
+          result.reason = "fault.accel_noise_scale must be >= 0";
+          // `return`, not `break`: breaking out of the loop falls through to
+          // set_fault() below and would apply the half-validated set the
+          // caller was just told was rejected.
+          return result;
+        }
+        fault.accel_noise_scale = p.as_double();
+      } else if (p.get_name() == "fault.noise_scale") {
         if (p.as_double() < 0.0) {
           result.successful = false;
           result.reason = "fault.noise_scale must be >= 0";
@@ -159,8 +172,11 @@ private:
     }
     processor_->set_fault(fault);
     RCLCPP_INFO(
-      get_logger(), "IMU fault state: noise_scale=%.2f bias_offset=%.5f outage=%s",
-      fault.noise_scale, fault.gyro_bias_offset, fault.outage ? "true" : "false");
+      get_logger(),
+      "IMU fault state: gyro noise x%.2f, accel noise x%.2f, "
+      "bias offset %.5f rad/s, outage %s",
+      fault.noise_scale, fault.accel_noise_scale, fault.gyro_bias_offset,
+      fault.outage ? "true" : "false");
     return result;
   }
 

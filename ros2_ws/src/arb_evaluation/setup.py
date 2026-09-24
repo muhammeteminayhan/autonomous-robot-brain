@@ -9,6 +9,7 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/launch', ['launch/scenario.launch.py']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -23,8 +24,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            # Populated from Phase 5 onwards, e.g.
-            # 'evaluate_localization = arb_evaluation.evaluate_localization:main',
+            'fault_scheduler = arb_evaluation.fault_scheduler:main',
         ],
     },
 )

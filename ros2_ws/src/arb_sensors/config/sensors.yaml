@@ -48,7 +48,12 @@
     seed: 1
 
     fault:
+      # Gyro and accelerometer scale SEPARATELY: the scenarios distinguish
+      # them (Case B inflates both, Case F only the gyro), and a shared knob
+      # made configs/scenarios/*.yaml's `affect_accelerometer` a comment
+      # rather than a setting.
       noise_scale: 1.0
+      accel_noise_scale: 1.0
       gyro_bias_offset: 0.0
       outage: false
 

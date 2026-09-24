@@ -121,6 +121,39 @@ TEST(ImuProcessor, NoiseScaleWidensTheReportedCovarianceToo)
   EXPECT_NEAR(r.message->angular_velocity_covariance[0], 0.01, 1e-12);
 }
 
+TEST(ImuProcessor, GyroAndAccelerometerNoiseScaleIndependently)
+{
+  // The scenarios distinguish them: Case B degrades the whole package, Case F
+  // only the gyro. With one shared knob, `affect_accelerometer: false` in
+  // configs/scenarios/case_f_multi_degradation.yaml was a comment rather than
+  // a setting -- the accelerometer was degraded anyway and nothing said so.
+  ImuConfig c = quiet_config();
+  c.gyro_white_sigma = 0.01;
+  c.accel_white_sigma = 0.05;
+  ImuProcessor p(c);
+
+  ImuFaultState f;
+  f.noise_scale = 10.0;         // gyro only
+  f.accel_noise_scale = 1.0;
+  p.set_fault(f);
+  const auto gyro_only = p.process(make_imu(0.0, 0.0, 0.0), 0.0);
+  ASSERT_TRUE(gyro_only.message.has_value());
+  EXPECT_NEAR(p.gyro_sigma(), 0.10, 1e-12);
+  EXPECT_NEAR(p.accel_sigma(), 0.05, 1e-12) << "accelerometer must be untouched";
+  EXPECT_NEAR(gyro_only.message->linear_acceleration_covariance[0],
+              0.05 * 0.05, 1e-12);
+
+  f.noise_scale = 1.0;          // accelerometer only
+  f.accel_noise_scale = 4.0;
+  p.set_fault(f);
+  const auto accel_only = p.process(make_imu(0.0, 0.0, 0.0), 0.01);
+  ASSERT_TRUE(accel_only.message.has_value());
+  EXPECT_NEAR(p.gyro_sigma(), 0.01, 1e-12) << "gyro must be untouched";
+  EXPECT_NEAR(p.accel_sigma(), 0.20, 1e-12);
+  EXPECT_NEAR(accel_only.message->angular_velocity_covariance[0],
+              0.01 * 0.01, 1e-12);
+}
+
 TEST(ImuProcessor, InjectedNoiseHasTheConfiguredSpread)
 {
   ImuConfig c = quiet_config();

@@ -19,5 +19,5 @@ Her faz için bir dosya:
 | `phase-07-planlama.md` | 7 | A*, Dijkstra, heuristic admissibility |
 | `phase-08-lokal-kacinma.md` | 8 | DWA, hız uzayı, admissible velocity, carrot |
 | `phase-09-kontrol.md` | 9 | PID, anti-windup, sarılmış açı türevi, rate limiter |
-| `phase-10-ariza-enjeksiyonu.md` | 10 | Fault injection, filtre dayanıklılığı |
+| `phase-10-ariza-enjeksiyonu.md` | 10 | Fault injection, senaryo zamanlayıcı, recovery time |
 | `phase-11-benchmark.md` | 11 | Deney tasarımı, sonuç yorumlama |

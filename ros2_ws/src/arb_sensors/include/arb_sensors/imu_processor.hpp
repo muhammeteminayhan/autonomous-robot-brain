@@ -60,7 +60,23 @@ struct ImuConfig
 /// overwritten by a fault.
 struct ImuFaultState
 {
-  double noise_scale{1.0};      ///< multiplies the white-noise sigma
+  /// Multiplies the GYROSCOPE white-noise sigma.
+  double noise_scale{1.0};
+
+  /// Multiplies the ACCELEROMETER white-noise sigma, separately.
+  ///
+  /// Separate because the scenarios distinguish them: Case B inflates both
+  /// (severe vibration shakes the whole package) while Case F inflates only the
+  /// gyro. One shared knob made `affect_accelerometer: false` a comment rather
+  /// than a setting, and a config value that is silently ignored is worse than
+  /// no config value.
+  ///
+  /// It cannot change the pose estimate, and that is the point: the EKF does
+  /// not fuse the accelerometer at all (see ekf.hpp -- for a planar robot at
+  /// walking pace the signal is buried under gravity leakage from millidegree
+  /// tilt). Case B measures that claim instead of asserting it.
+  double accel_noise_scale{1.0};
+
   double gyro_bias_offset{0.0}; ///< rad/s added on top of the modelled bias
   bool outage{false};           ///< drop every sample while true
 };

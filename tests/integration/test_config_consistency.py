@@ -22,12 +22,15 @@ longer exists.
 from __future__ import annotations
 
 import math
+import sys
 from pathlib import Path
 
 import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "ros2_ws" / "src" / "arb_evaluation"))
+from arb_evaluation import scenario as sc  # noqa: E402
 ROOT_SENSORS = REPO_ROOT / "configs" / "sensors.yaml"
 ROOT_ROBOT = REPO_ROOT / "configs" / "robot.yaml"
 NODE_SENSORS = (REPO_ROOT / "ros2_ws" / "src" / "arb_sensors" / "config" / "sensors.yaml")
@@ -134,6 +137,20 @@ def test_every_node_declares_a_fault_section(node_cfg: dict):
         assert "outage" in params["fault"], f"{node}.fault has no outage flag"
 
 
+def _nominal_fault_value(key: str, value):
+    """The value a fault knob must hold on a HEALTHY robot.
+
+    Inferred from the name, not from a list: a MULTIPLIER is nominal at 1.0 and
+    everything else is nominal at nothing-added, so anything ending in `_scale`
+    is 1.0, a flag is False, and the rest are 0.0.
+    """
+    if isinstance(value, bool):
+        return False
+    if key.endswith("_scale"):
+        return 1.0
+    return 0.0
+
+
 def test_faults_are_disabled_by_default(node_cfg: dict):
     """The checked-in configuration must describe a HEALTHY robot.
 
@@ -144,10 +161,39 @@ def test_faults_are_disabled_by_default(node_cfg: dict):
     offenders: list[str] = []
     for node, params in node_cfg.items():
         for key, value in params["fault"].items():
-            nominal = 1.0 if key == "noise_scale" else (False if isinstance(value, bool) else 0.0)
-            if value != nominal:
-                offenders.append(f"{node}.fault.{key} = {value} (expected {nominal})")
+            if value != _nominal_fault_value(key, value):
+                offenders.append(
+                    f"{node}.fault.{key} = {value} "
+                    f"(expected {_nominal_fault_value(key, value)})")
     assert not offenders, "faults enabled in the default config:\n  " + "\n  ".join(offenders)
+
+
+def test_every_fault_knob_follows_the_naming_convention(node_cfg: dict):
+    """The healthy default is inferred from the NAME, so the name must be clear.
+
+    `_nominal_fault_value` reads a knob's healthy value off its name rather than
+    from a list of known keys. An earlier version special-cased the single name
+    `noise_scale`, so adding `accel_noise_scale` made the check demand that a
+    multiplier default to zero -- i.e. a sensor with no noise at all -- and the
+    new knob looked like a fault left switched on.
+
+    A knob whose name says nothing about its type would break the inference
+    silently, so it is rejected here instead.
+    """
+    for node, params in node_cfg.items():
+        for key, value in params["fault"].items():
+            recognised = (
+                isinstance(value, bool)
+                or key.endswith("_scale")
+                or key.endswith("_ratio")
+                or key.endswith("_probability")
+                or key.endswith("_rad_s")
+                or key.endswith("_offset")
+            )
+            assert recognised, (
+                f"{node}.fault.{key} does not follow the convention: a fault "
+                f"knob must be a bool, or end in _scale (nominal 1.0) or one of "
+                f"_ratio/_probability/_rad_s/_offset (nominal 0.0)")
 
 
 def test_encoder_resolution_is_representable(root_cfg: dict):
@@ -244,3 +290,66 @@ def test_odometry_track_width_is_calibrated_not_geometric(localization_cfg: dict
         f"calibrated {calibrated} lies outside [inner edge, outer edge] = "
         f"[{geometric - wheel_width}, {geometric + wheel_width}]"
     )
+
+
+# ===========================================================================
+#  The fault scheduler's idea of "healthy" vs the parameter files' idea
+# ===========================================================================
+#
+# arb_evaluation/scenario.py writes out every fault knob and its nominal value
+# rather than discovering them, because the scheduler's job when a fault ends
+# is to return the robot to a KNOWN-GOOD state. A knob it does not know about
+# is a knob it cannot clear, and the contamination would carry silently into
+# whatever scenario ran next -- most likely a nominal one, whose numbers every
+# other case is then measured against.
+#
+# Writing the list out is only safe if it cannot drift from the parameter files
+# it claims to mirror, which is what these two tests are for.
+
+
+def test_scheduler_knows_every_fault_knob_the_nodes_declare(node_cfg: dict):
+    """Every knob in the parameter files must appear in scenario.NOMINAL."""
+    missing: list[str] = []
+    for node, params in node_cfg.items():
+        assert node in sc.NOMINAL, f"{node} has fault knobs the scheduler cannot clear"
+        for key in params["fault"]:
+            if f"fault.{key}" not in sc.NOMINAL[node]:
+                missing.append(f"{node}.fault.{key}")
+    assert not missing, (
+        "knobs the fault scheduler would never reset:\n  " + "\n  ".join(missing))
+
+
+def test_scheduler_invents_no_knob_the_nodes_do_not_have(node_cfg: dict):
+    """And nothing the other way either.
+
+    A knob in NOMINAL that no node declares makes the scheduler call
+    set_parameters with a name the node rejects. The rejection is logged and
+    the run continues, so the scenario silently applies less than it says.
+    """
+    extra: list[str] = []
+    for node, params in sc.NOMINAL.items():
+        assert node in node_cfg, f"scenario.NOMINAL names unknown node '{node}'"
+        declared = {f"fault.{k}" for k in node_cfg[node]["fault"]}
+        for key in params:
+            if key not in declared:
+                extra.append(f"{node}.{key}")
+    assert not extra, (
+        "knobs the scheduler would set that no node declares:\n  "
+        + "\n  ".join(extra))
+
+
+def test_scheduler_nominal_values_match_the_parameter_files(node_cfg: dict):
+    """The healthy value must be the same in both places.
+
+    If they disagree, a scenario would "restore nominal" to something the
+    checked-in configuration does not consider nominal, and the difference
+    would only show up as an unexplained offset in the next run's baseline.
+    """
+    mismatches: list[str] = []
+    for node, params in sc.NOMINAL.items():
+        for key, value in params.items():
+            declared = node_cfg[node]["fault"][key.removeprefix("fault.")]
+            if declared != value:
+                mismatches.append(
+                    f"{node}.{key}: config has {declared}, scheduler has {value}")
+    assert not mismatches, "nominal values disagree:\n  " + "\n  ".join(mismatches)

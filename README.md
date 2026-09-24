@@ -64,7 +64,7 @@ policy: **[docs/architecture.md](docs/architecture.md)**.
 | `arb_planning` | A*, Dijkstra, Dynamic Window Approach | 7, 8 |
 | `arb_control` | PID trajectory tracking | 9 |
 | `arb_bringup` | Top-level launch composition | 1+ |
-| `arb_evaluation` | Metrics, plots, benchmark reports (Python) | 5, 11 |
+| `arb_evaluation` | Fault-scenario scheduler, metrics, benchmark reports (Python) | 5, 10-11 |
 
 ### One rule worth stating up front
 
@@ -342,6 +342,26 @@ ros2 launch arb_planning planning.launch.py local_planner:=true unknown_is_letha
 
 ```bash
 python3 scripts/evaluate_navigation.py --mode goal --goal goal_room_e
+```
+
+Play a fault scenario and score what the estimator did. The scheduler applies
+the scenario's knob timeline at runtime; the runner drives a fixed open-loop
+route so the TRUE trajectory is identical in every scenario:
+
+```bash
+python3 scripts/run_scenario.py --scenario configs/scenarios/case_c_encoder_drift.yaml
+```
+
+Or drive the scheduler on its own, against a stack you are watching in RViz:
+
+```bash
+ros2 launch arb_evaluation scenario.launch.py scenario:=configs/scenarios/case_e_sensor_outage.yaml
+```
+
+Collect every scenario's metrics into the comparison table and chart:
+
+```bash
+python3 scripts/fault_report.py
 ```
 
 Regenerate the world after editing `configs/world.yaml`:

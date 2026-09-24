@@ -2,6 +2,13 @@
 # indistinguishable from a genuine turn if you only look at the encoders, so
 # dead reckoning curves away silently. Only an independent heading source
 # (gyro) or an absolute source (LiDAR scan match) can catch it.
+# RECOVERY WINDOW
+# Every fault clears 25 s before the scenario ends. The first version ran each
+# fault to the last second, which made "recovery time" -- one of the three
+# numbers this phase exists to report -- unmeasurable for four of the six
+# cases: there was no post-fault interval in which to measure anything. The
+# degraded phase is unchanged in character; only its tail was trimmed.
+
 scenario:
   id: "case_c_encoder_drift"
   description: "Right wheel encoder accumulates a +0.05 rad/s bias."
@@ -9,7 +16,7 @@ scenario:
   faults:
     - type: "encoder_drift"
       onset_s: 15.0
-      duration_s: 105.0
+      duration_s: 80.0
       params:
         wheel: "right"
         bias_rad_s: 0.05

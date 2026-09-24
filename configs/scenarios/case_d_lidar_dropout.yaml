@@ -1,6 +1,13 @@
 # CASE D -- 60 % of beams return inf. Scan matching degrades but does not stop.
 # Tests the NIS chi-square gate: a scan match computed from too few beams has
 # a large innovation and must be REJECTED rather than fused.
+# RECOVERY WINDOW
+# Every fault clears 25 s before the scenario ends. The first version ran each
+# fault to the last second, which made "recovery time" -- one of the three
+# numbers this phase exists to report -- unmeasurable for four of the six
+# cases: there was no post-fault interval in which to measure anything. The
+# degraded phase is unchanged in character; only its tail was trimmed.
+
 scenario:
   id: "case_d_lidar_dropout"
   description: "60 % of LiDAR beams dropped in bursts."
@@ -8,7 +15,7 @@ scenario:
   faults:
     - type: "lidar_dropout"
       onset_s: 25.0
-      duration_s: 95.0
+      duration_s: 70.0
       params:
         dropout_ratio: 0.60
         burst_mode: true
