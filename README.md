@@ -396,6 +396,13 @@ Regenerate the world after editing `configs/world.yaml`:
 python3 scripts/generate_world.py
 ```
 
+---
+
+## What each subsystem does, and what it measured
+
+One section per phase, each ending in a number that came from running it. The
+derivations are in [`docs/`](docs/); this is the tour.
+
 ### Simulation
 
 ![LiDAR scan overlaid on the generated floor plan](results/phase1/scan_vs_world.png)
@@ -787,9 +794,26 @@ the hardest bugs in this whole project to find after the fact.
 
 ## Results
 
-> Populated from Phase 5 onwards. Trajectory comparisons, per-axis error traces,
-> covariance evolution, planner benchmarks and the fault-injection comparison
-> table will be written to `results/` and summarised here.
+Every figure quoted anywhere in this repository is in [`results/`](results/),
+one directory per phase, alongside the raw metrics it was derived from.
+
+| Directory | What is in it |
+|---|---|
+| `results/phase1/` | LiDAR scan overlaid on the generated floor plan |
+| `results/phase3/` | Odometry drift before and after track-width calibration |
+| `results/phase5/` | Trajectory comparison, per-axis error, covariance evolution, latency |
+| `results/phase6/` | Occupancy grids and their scores against the known floor plan |
+| `results/phase7/` | Planner benchmark CSV: A* vs Dijkstra over 12 queries |
+| `results/phase9/` | Path following and end-to-end navigation, PID vs DWA |
+| `results/phase10/` | Six fault scenarios, per-case error traces and `summary.md` |
+| `results/phase11/` | Parameter sweeps repeated over seeds, and `raw/` per-run metrics |
+
+The `raw/` metrics are the record; every table and plot is derived from them
+and can be re-derived without re-running the simulator:
+
+```bash
+python3 scripts/run_benchmark.py --aggregate-only
+```
 
 ---
 
