@@ -396,6 +396,77 @@ isolation rule as ground truth and the fault state: a local planner *told*
 where an obstacle is, rather than seeing it, is solving a different and much
 easier problem.
 
+### Results: the local planner walks into it, every time
+
+![Dynamic obstacle](../results/phase11/sweep_dynamic_obstacle.png)
+
+| metric | clear corridor | crossing obstacle |
+|---|---|---|
+| runs | 3 | 3 |
+| arrived (within 0.30 m) | **3 / 3** | **0 / 3** |
+| touched the obstacle (ground truth) | 0 | **3 / 3** |
+| runs with a beam inside `range_min` | 0 | 3 |
+| time to goal [s] | 36.9 ± 0.2 | 50.4 ± 1.0 |
+| distance driven [m] | 16.94 ± 0.03 | 18.12 ± 1.48 |
+| nearest measurable return [m] | 0.373 ± 0.021 | 0.121 ± 0.001 |
+| **true obstacle clearance [m]** | -- | **−0.230 ± 0.022** |
+| final error [m] | 0.298 ± 0.001 | 2.035 ± 2.216 |
+
+A negative clearance is an overlap. The robot and the obstacle occupied the
+same space by 23 cm, in **every run**.
+
+Two of the three still ended up near the goal (0.45 m and 0.49 m) and stopped
+themselves believing they had arrived — the localisation-limited arrival
+accuracy already documented in Phase 9, made worse by the collision. One ended
+5.17 m away. None scored as arrived against a 0.30 m tolerance, but "0 / 3
+arrived" overstates it: the honest statement is **0 / 3 within 0.30 m, 2 / 3
+within 0.5 m, 3 / 3 collided.**
+
+### Why: DWA plans against a still photograph
+
+The trace says it plainly.
+
+```
+   t    clearance   v_cmd   v_true
+17.3       0.354    0.492    0.492     full speed, corridor looks clear
+17.5       0.245    0.453    0.460
+17.7       0.118    0.441    0.444
+17.8       0.027    0.000    0.433     <- FIRST stop command
+17.9      -0.023    0.000    0.328     already overlapping
+```
+
+DWA does not command a stop until the clearance is **0.027 m**. At that instant
+it is travelling 0.437 m/s and needs `v²/2a = 0.096 m` to stop. It has 0.027 m.
+The collision was unavoidable a second earlier.
+
+It is not that the planner was careless — it is that **DWA has no model of
+obstacle velocity**. Its rollout sweeps a trajectory forward through the
+*current* obstacle positions and rejects anything that intersects them. A
+crossing obstacle is not in the swept volume when the rollout is computed; it
+walks into that volume afterwards. Each 50 ms cycle the planner re-computes,
+correctly, that the path ahead is clear — of where the obstacle *was*.
+
+The admissible-velocity condition `v ≤ √(2·d·a_max)` is doing its job exactly
+as designed. `d` is the distance to collision **assuming the world holds
+still**, and that assumption is what fails.
+
+The real fix is not a tuning change. It is velocity obstacles (or RVO), or a
+costmap layer that inflates along an obstacle's *predicted* motion — both of
+which require estimating obstacle velocity, which this stack does not do at
+all: the scan is a set of points with no correspondence between frames.
+
+### The experiment also has a flaw, and it is worth stating
+
+The obstacle sweeps `y ∈ [−1.1, +1.1]` **forever**, and the corridor is 3 m
+wide. It is less a pedestrian crossing than a **moving wall the robot cannot
+wait out**. A real crossing — one traverse, then gone — would let a planner
+that simply stopped and waited succeed, and this design gives it no such
+option.
+
+The mechanism above is unaffected: DWA reacted at 0.027 m because it had no
+velocity model, and it would have done the same on a single traverse. But
+"0 / 3 arrived" is partly a property of the course, not only of the planner.
+
 ---
 
 ## 6. What these sweeps cannot tell you

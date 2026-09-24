@@ -348,6 +348,16 @@ matcher confirmed it at score 0.96 — because the map was built at the pose it
 was supposed to be correcting. *Shows: you check covariance consistency, not
 just error, and you can reason about a whole system rather than a component.*
 
+**"The planner that could not see it coming."** DWA collided with a crossing
+obstacle in every one of three runs, first braking at 0.027 m of clearance
+while needing 0.096 m to stop. Not carelessness: DWA rolls a trajectory forward
+through the *current* obstacle positions, and a crossing obstacle enters that
+swept volume after the rollout was computed. The admissible-velocity condition
+`v ≤ √(2·d·a_max)` works exactly as designed — `d` assumes the world holds
+still. The fix is velocity obstacles or a predicted-motion costmap layer, not
+tuning. *Shows: you can tell a bug from a design limit, and you know the
+standard answer.*
+
 **"One exponent, a factor of 19."** Process noise written `(σ·dt)²` instead of
 `σ²·dt`. The NIS gate started rejecting real decelerations as outliers and
 position RMSE was 0.298 m instead of 0.0155 m. *Shows: you know why random-walk

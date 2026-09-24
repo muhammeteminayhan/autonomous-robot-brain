@@ -176,7 +176,11 @@ FIELDS = [
     ("time_s", "time to goal [s]", ".1f"),
     ("distance_m", "distance driven [m]", ".2f"),
     ("path_efficiency", "path efficiency", ".3f"),
-    ("min_lidar_range_m", "closest approach [m]", ".3f"),
+    # The LiDAR-derived number bottoms out at range_min and is reported for
+    # continuity with the other phases, NOT as a collision verdict -- see
+    # min_obstacle_clearance_m for that.
+    ("min_lidar_range_m", "nearest measurable return [m]", ".3f"),
+    ("min_obstacle_clearance_m", "true obstacle clearance [m]", ".3f"),
     ("mean_speed_m_s", "mean speed [m/s]", ".3f"),
     ("final_error_m", "final error [m]", ".3f"),
 ]
@@ -196,7 +200,12 @@ def summarise(runs: list[dict]) -> dict:
     if not runs:
         return out
     out["arrived"] = sum(1 for r in runs if r.get("arrived"))
+    # Two verdicts, deliberately separate. The LiDAR one is blind inside
+    # range_min; the geometric one is computed from ground truth and is the one
+    # to believe when an obstacle is present.
     out["collisions"] = sum(1 for r in runs if not r.get("collision_free", True))
+    out["touched"] = sum(1 for r in runs if r.get("touched_obstacle", False))
+    out["blind_spot"] = sum(1 for r in runs if r.get("blind_spot_samples", 0) > 0)
     for key, _, _ in FIELDS:
         if key == "arrived":
             continue
@@ -247,8 +256,10 @@ def report(groups: dict[bool, list[dict]], out_dir: pathlib.Path) -> pathlib.Pat
     lines.append(f"| runs | {clear.get('runs', 0)} | {blocked.get('runs', 0)} |")
     lines.append(f"| arrived | {clear.get('arrived', 0)} / {clear.get('runs', 0)} "
                  f"| {blocked.get('arrived', 0)} / {blocked.get('runs', 0)} |")
-    lines.append(f"| collisions | {clear.get('collisions', 0)} "
-                 f"| {blocked.get('collisions', 0)} |")
+    lines.append(f"| touched the obstacle (ground truth) | {clear.get('touched', 0)} "
+                 f"| {blocked.get('touched', 0)} |")
+    lines.append(f"| runs with a beam inside range_min | {clear.get('blind_spot', 0)} "
+                 f"| {blocked.get('blind_spot', 0)} |")
     for key, label, spec in FIELDS:
         if key == "arrived":
             continue

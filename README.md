@@ -869,7 +869,14 @@ to work until it has been executed.
 | Fault state is isolated from every estimator | ✅ verified | same guard as ground truth, and it caught a hole that had made every C++ `#include` line invisible to the static check |
 | IMU gyro and accelerometer noise scale independently | ✅ verified | `GyroAndAccelerometerNoiseScaleIndependently` — `affect_accelerometer` was previously a comment, not a setting |
 | Fault scenarios measured (Cases A-F) | ✅ measured | [results/phase10/summary.md](results/phase10/summary.md) — EKF 1.60-2.77x better than odometry; Case C not survived |
-| Benchmark sweep (5 experiments) | ❌ not implemented | Phase 11 |
+| Benchmark sweep, 4 estimation experiments | ✅ measured | 72 runs, 3 seeds per point ([results/phase11](results/phase11)) |
+| Encoder-bias recovery threshold | ✅ measured | between **0.04 and 0.05 rad/s**; confirms the hypothesis Phase 10 could only raise |
+| Filter down-weights a noisy gyro | ✅ measured | **40x** noise change produces **1.7x** error change; no measurable effect below 5x |
+| Scan matching survives extreme beam loss | ✅ measured | no degradation at **97 %** dropout (11 of 360 beams); fault confirmed applied (139,546 beams dropped) |
+| Filter survives losing its only absolute reference | ✅ measured | 30 s LiDAR outage costs ~2 mm; outage confirmed by counting scan matches (0 in 20 s vs 23 after) |
+| Local planner vs a crossing obstacle | ✅ measured | **collides in 3/3 runs** — DWA has no obstacle-velocity model and first brakes at 0.027 m of clearance while needing 0.096 m to stop |
+| Collision verdict is not taken from the LiDAR alone | ✅ verified | the scan is blind inside `range_min`, where collisions are; the geometric test from ground truth caught 3 collisions the scan-based one scored as clean |
+| Moving obstacle is visible to the LiDAR | ✅ verified | spawns, sweeps its segment, and 50/99 samples return a beam at its range — not an invisible `<actor>` |
 
 
 ---

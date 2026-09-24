@@ -132,6 +132,13 @@ SETTLING_BAND_M = 0.05
 #: anticipation, correctly, being scored as a failure to settle.
 TRANSIENT_DISTANCE_M = 3.0
 
+#: Robot circumscribed radius and the moving obstacle's radius, for the
+#: geometric collision test. Both come from configs -- robot.yaml's chassis is
+#: 0.40 x 0.30 m so half the diagonal is 0.25 m, and the obstacle node's
+#: `radius_m` defaults to 0.20 m.
+ROBOT_RADIUS_M = 0.25
+OBSTACLE_RADIUS_M = 0.20
+
 #: Below this the run is a collision, not a lap. The robot's circumscribed
 #: radius is 0.25 m and the LiDAR sits 0.14 m forward of base_link, so a
 #: reading of 0.11 m in front means contact.
@@ -246,6 +253,7 @@ class NavigationEvaluator(Node):
         self.cmd_time: float = 0.0
         self.diag: list[float] | None = None
         self.planned: Path | None = None
+        self.obstacle: PoseStamped | None = None
 
         self.create_subscription(
             Odometry, "/arb/ground_truth/odom", self._on_truth, SENSOR_QOS)
@@ -262,6 +270,11 @@ class NavigationEvaluator(Node):
             Float64MultiArray, "/arb/control_diagnostics", self._on_diag, 10)
         self.create_subscription(
             Path, "/arb/global_path", self._on_planned, 10)
+        # Instrumentation only, and only present when the moving-obstacle
+        # experiment is running. Never read by anything in the control path.
+        self.create_subscription(
+            PoseStamped, "/arb/ground_truth/obstacle_pose",
+            self._on_obstacle, 10)
 
         self.path_pub = self.create_publisher(Path, path_topic, LATCHED_QOS)
         self.goal_pub = self.create_publisher(PoseStamped, "/arb/goal", 10)
@@ -274,6 +287,7 @@ class NavigationEvaluator(Node):
     def _on_pose(self, m): self.pose = m
     def _on_scan(self, m): self.scan = m
     def _on_planned(self, m): self.planned = m
+    def _on_obstacle(self, m): self.obstacle = m
     def _on_diag(self, m): self.diag = list(m.data)
 
     def _on_cmd(self, m):
@@ -332,11 +346,43 @@ class NavigationEvaluator(Node):
             self.spin_for(0.05)
 
     def min_range(self) -> float:
+        """Nearest MEASURABLE return, which is not the same as nearest thing.
+
+        Readings at or below `range_min` are excluded because the sensor cannot
+        measure there -- but excluding them silently means this number bottoms
+        out at range_min and stops falling however close something gets. Three
+        obstacle runs all reported 0.120 m to three decimals, which is the
+        sensor's floor rather than a measurement, and `collision_free` returned
+        True for every one of them. Use `blind_spot_hits()` alongside this, and
+        for the obstacle runs use the geometric clearance from ground truth.
+        """
         if self.scan is None:
             return float("inf")
         r = np.asarray(self.scan.ranges, dtype=float)
         good = r[np.isfinite(r) & (r > self.scan.range_min)]
         return float(good.min()) if good.size else float("inf")
+
+    def blind_spot_hits(self) -> int:
+        """Beams reporting at or below range_min: something is too close to measure."""
+        if self.scan is None:
+            return 0
+        r = np.asarray(self.scan.ranges, dtype=float)
+        return int(np.count_nonzero(np.isfinite(r) & (r <= self.scan.range_min)))
+
+    def obstacle_clearance(self, robot_x: float, robot_y: float) -> float:
+        """Surface-to-surface distance to the moving obstacle, from GROUND TRUTH.
+
+        The only honest collision test available here. The LiDAR cannot see
+        inside its own minimum range, which is exactly where a collision is, so
+        a scan-based verdict is blind at the moment it matters most. The
+        obstacle publishes its true pose as instrumentation precisely so this
+        can be computed; nothing in the control path may read it.
+        """
+        if self.obstacle is None:
+            return float("inf")
+        centre = math.hypot(self.obstacle.pose.position.x - robot_x,
+                            self.obstacle.pose.position.y - robot_y)
+        return centre - (ROBOT_RADIUS_M + OBSTACLE_RADIUS_M)
 
     def ready(self) -> bool:
         return (self.truth is not None and self.odom is not None
@@ -363,6 +409,8 @@ class NavigationEvaluator(Node):
             "v_cmd": self.cmd.linear.x if fresh else 0.0,
             "w_cmd": self.cmd.angular.z if fresh else 0.0,
             "min_range": self.min_range(),
+            "blind_spot_hits": self.blind_spot_hits(),
+            "obstacle_clearance": self.obstacle_clearance(gx, gy),
         }
         # The controller's own view of the error, when it publishes one. Its
         # disagreement with the ground-truth cross-track error is the
@@ -873,6 +921,17 @@ def run_goal(node: NavigationEvaluator, args, world: dict) -> dict:
         "final_estimate_error_m": math.hypot(final["ex"] - final["gx"],
                                              final["ey"] - final["gy"]),
         "min_lidar_range_m": float(np.nanmin([q["min_range"] for q in node.samples])),
+        # Beams reporting inside range_min: something was closer than the
+        # sensor can measure. The LiDAR-only verdict is blind there, which is
+        # exactly where a collision is.
+        "blind_spot_samples": int(sum(
+            1 for q in node.samples if q.get("blind_spot_hits", 0) > 0)),
+        "min_obstacle_clearance_m": float(np.nanmin(
+            [q.get("obstacle_clearance", float("inf")) for q in node.samples])),
+        # Geometric, from ground truth, and therefore the only verdict that
+        # holds when the obstacle is inside the LiDAR's minimum range.
+        "touched_obstacle": bool(np.nanmin(
+            [q.get("obstacle_clearance", float("inf")) for q in node.samples]) <= 0.0),
         "collision_free": bool(
             np.nanmin([q["min_range"] for q in node.samples]) > COLLISION_RANGE_M),
         "mean_speed_m_s": float(np.mean(np.abs([q["v_true"] for q in node.samples]))),
