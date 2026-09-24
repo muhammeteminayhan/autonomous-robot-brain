@@ -304,6 +304,67 @@ freedom — is.
 
 ---
 
+## 4d. Thirty seconds without an absolute reference costs a centimetre
+
+The LiDAR is the **only absolute** measurement in the stack. Everything else is
+a rate, and rates only say how much things have changed. This sweeps how long
+the filter can go without one.
+
+![LiDAR outage sweep](../results/phase11/sweep_lidar_outage.png)
+
+| outage [s] | EKF pos RMSE [m] | degraded-phase RMSE [m] | recovered | inside 2-sigma |
+|---|---|---|---|---|
+| 0 | 0.0269 ± 0.0030 | -- | n/a | 95 % |
+| 5 | 0.0261 ± 0.0057 | 0.0226 | 3 / 3 | 98 % |
+| 10 | 0.0289 ± 0.0017 | 0.0190 | 3 / 3 | 92 % |
+| 20 | 0.0322 ± 0.0010 | 0.0211 | 3 / 3 | 93 % |
+| 30 | 0.0230 ± 0.0021 | 0.0216 | 3 / 3 | 99 % |
+
+Every run recovers, and the whole-run RMSE does not move outside the spread.
+The degraded-phase column rises monotonically from 10 s onwards — 0.0190,
+0.0211, 0.0216 — which is the effect, and it is about **2 mm**.
+
+### The outage is real; this was checked
+
+A second null result in the same phase deserves more suspicion than the first,
+so the knob was exercised against a live stack and the scan matcher counted
+directly:
+
+```
+outage ON,  20 s elapsed:   0 new matches attempted
+outage OFF, 20 s elapsed:  23 new matches attempted
+```
+
+Scan matching stops completely. The preprocessor logged 213 scans dropped over
+the same window.
+
+### Why it costs so little, in a number from Phase 4
+
+During an outage the EKF is not on raw wheel odometry — it is on **odometry
+fused with the gyroscope**, which Phase 4 measured at **0.13 % of distance
+travelled** against raw odometry's 0.94 %.
+
+At 0.25 m/s a 30 s outage is 7.5 m, so the drift added while blind is
+`0.0013 x 7.5 = 0.010 m`. Against a baseline error of about 0.02 m, a
+centimetre is exactly what the table shows. The result is not a surprise; it is
+the Phase 4 number applied for thirty seconds.
+
+That is also the argument for fusing the gyro rather than treating wheel
+odometry as a control input, stated as a consequence rather than a principle:
+**it is what makes the absolute reference optional for half a minute.**
+
+### The route flatters this, and the honest number is smaller
+
+The lap is 30.5 s. A 30 s outage is therefore almost exactly **one closed
+lap**, and the robot ends it back where it started, so part of the
+dead-reckoning position error cancels rather than accumulating.
+
+A 30 s outage on a straight 7.5 m traverse would show more. The mechanism
+above still applies and the conclusion survives, but the specific number
+0.0216 m is the best case, not the typical one.
+
+---
+
 ## 5. The fifth experiment tests the planner, not the estimator
 
 Four sweeps degrade a **sensor**. The last one degrades the **world**: an

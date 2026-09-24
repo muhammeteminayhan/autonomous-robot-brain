@@ -54,4 +54,12 @@ Phase 10's 60 % dropout was indistinguishable from nominal, because 40 % of 360 
 
 The LiDAR is the only ABSOLUTE measurement in the stack; everything else is a rate, and rates only say how much things have changed. This sweeps how long the filter can go without one and still come back.
 
-*not run*
+![lidar_outage](sweep_lidar_outage.png)
+
+| outage_s [s] | runs | EKF pos RMSE [m] | odom pos RMSE [m] | EKF heading RMSE [deg] | EKF recovered | EKF inside 2-sigma |
+|---|---|---|---|---|---|---|
+| 0 | 3 | 0.0269 ± 0.0030 | 0.0700 ± 0.0030 | 2.08 ± 0.05 | n/a | 95 % |
+| 5 | 3 | 0.0261 ± 0.0057 | 0.0683 ± 0.0016 | 2.17 ± 0.21 | 3 / 3 | 98 % |
+| 10 | 3 | 0.0289 ± 0.0017 | 0.0682 ± 0.0016 | 2.16 ± 0.11 | 3 / 3 | 92 % |
+| 20 | 3 | 0.0322 ± 0.0010 | 0.0685 ± 0.0015 | 2.37 ± 0.09 | 3 / 3 | 93 % |
+| 30 | 3 | 0.0230 ± 0.0021 | 0.0687 ± 0.0007 | 2.06 ± 0.04 | 3 / 3 | 99 % |

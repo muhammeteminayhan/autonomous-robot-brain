@@ -1,0 +1,63 @@
+{
+  "scenario": "lidar_outage_5",
+  "description": "LiDAR outage duration at 5 s",
+  "aborted": null,
+  "fault_windows": [
+    {
+      "type": "sensor_outage",
+      "onset_s": 20.0,
+      "end_s": 25.0,
+      "params": {
+        "sensor": "lidar"
+      }
+    }
+  ],
+  "samples": 3837,
+  "estimators": {
+    "odometry": {
+      "duration_s": 94.76507139205933,
+      "distance_m": 15.065669426595067,
+      "position_rmse_m": 0.06834360387759025,
+      "position_max_m": 0.13940412802287536,
+      "position_final_m": 0.13632772137459795,
+      "heading_rmse_deg": 5.210571521498351,
+      "heading_max_deg": 9.639130676963847,
+      "position_rmse_healthy_m": 0.009982856530465616,
+      "position_rmse_degraded_m": 0.034862215171746716,
+      "position_rmse_recovered_m": 0.07912100383451043,
+      "heading_rmse_healthy_deg": 0.828358387044837,
+      "heading_rmse_degraded_deg": 1.863143752451053,
+      "heading_rmse_recovered_deg": 6.051355185116589,
+      "recovery_band_m": 0.05,
+      "recovery_time_s": 0.0,
+      "recovery_outcome": "never left the band",
+      "fraction_inside_2sigma_pos": 0.999478759447485,
+      "fraction_inside_2sigma_heading": 1.0,
+      "reported_final_sigma_pos_m": 0.28583901314123766
+    },
+    "ekf": {
+      "duration_s": 94.76507139205933,
+      "distance_m": 15.065669426595067,
+      "position_rmse_m": 0.023323688108185005,
+      "position_max_m": 0.10887346234118152,
+      "position_final_m": 0.03535361604528813,
+      "heading_rmse_deg": 2.0331622766932576,
+      "heading_max_deg": 10.50496194167042,
+      "position_rmse_healthy_m": 0.01669201828606933,
+      "position_rmse_degraded_m": 0.015113124716894308,
+      "position_rmse_recovered_m": 0.02538987650859803,
+      "heading_rmse_healthy_deg": 1.8343648976107696,
+      "heading_rmse_degraded_deg": 1.767455540528203,
+      "heading_rmse_recovered_deg": 2.105310321606726,
+      "recovery_band_m": 0.05,
+      "recovery_time_s": 0.0,
+      "recovery_outcome": "never left the band",
+      "fraction_inside_2sigma_pos": 0.9895751889497003,
+      "fraction_inside_2sigma_heading": 0.6794370602032838,
+      "reported_final_sigma_pos_m": 0.027489479960909516
+    }
+  },
+  "level": 5.0,
+  "seed": 3,
+  "experiment": "lidar_outage"
+}

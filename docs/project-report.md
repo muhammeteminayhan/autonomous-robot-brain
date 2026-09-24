@@ -323,7 +323,7 @@ Ordered by how much it would improve *this* project:
 > odometry, gyroscope and LiDAR scan matching, log-odds occupancy mapping, A*
 > global planning and DWA local avoidance. Reduced position error by **68 %**
 > versus dead reckoning (0.0155 m RMSE over 10 m) and validated under six
-> injected fault scenarios plus parameter sweeps repeated over seeds. 330 unit
+> injected fault scenarios plus parameter sweeps repeated over seeds. 332 unit
 > and 126 integration tests, hardened against 60 deliberately
 > injected mutations.
 
