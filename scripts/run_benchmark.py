@@ -250,6 +250,11 @@ def aggregate(raw_dir: pathlib.Path, experiment: dict) -> list[dict]:
                         for r in runs if estimator in r["estimators"]]
             row[f"{estimator}_recovered"] = sum(
                 1 for o in outcomes if o in ("recovered", "never left the band"))
+            # A level of zero has no fault, so "recovered" does not apply --
+            # and rendering it as "0 / 3" makes the control point look like the
+            # worst result in the sweep.
+            row[f"{estimator}_recovery_applies"] = any(
+                o != "no fault" for o in outcomes)
             times = [r["estimators"][estimator].get("recovery_time_s")
                      for r in runs if estimator in r["estimators"]]
             times = [t for t in times if t is not None and math.isfinite(t)]
@@ -280,9 +285,16 @@ def plot_experiment(experiment: dict, rows: list[dict],
         ax.legend(fontsize=8)
 
     n = max(r["runs"] for r in rows)
-    recovered = np.array([r.get("ekf_recovered", 0) for r in rows])
+    # The control level has no fault, so it is drawn as the full bar in grey
+    # rather than as zero: an empty bar there reads as "nothing recovered",
+    # which is the opposite of what a healthy robot did.
+    recovered = np.array([
+        n if not r.get("ekf_recovery_applies") else r.get("ekf_recovered", 0)
+        for r in rows])
+    colours = ["#adb5bd" if not r.get("ekf_recovery_applies") else "#2f9e44"
+               for r in rows]
     axes[2].bar(x, recovered, width=(x[1] - x[0]) * 0.6 if len(x) > 1 else 0.5,
-                color="#2f9e44")
+                color=colours)
     axes[2].axhline(n, color="#adb5bd", ls="--", lw=1.0, label=f"all {n} runs")
     axes[2].set_ylim(0, n + 0.4)
     axes[2].set_xlabel(f"{experiment['parameter']} [{experiment['unit']}]")
@@ -315,13 +327,14 @@ def markdown_table(experiment: dict, rows: list[dict]) -> str:
     for r in rows:
         inside = r.get("ekf_fraction_inside_2sigma_pos_mean")
         inside_text = "--" if inside is None else f"{inside * 100:.0f} %"
+        recovered = (f"{r.get('ekf_recovered', 0)} / {r['runs']}"
+                     if r.get("ekf_recovery_applies") else "n/a")
         out.append(
             f"| {r['level']:g} | {r['runs']} "
             f"| {cell(r, 'ekf', 'position_rmse_m')} "
             f"| {cell(r, 'odometry', 'position_rmse_m')} "
             f"| {cell(r, 'ekf', 'heading_rmse_deg', '.2f')} "
-            f"| {r.get('ekf_recovered', 0)} / {r['runs']} "
-            f"| {inside_text} |")
+            f"| {recovered} | {inside_text} |")
     return "\n".join(out)
 
 

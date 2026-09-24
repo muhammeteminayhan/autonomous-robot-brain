@@ -367,6 +367,29 @@ Collect every scenario's metrics into the comparison table and chart:
 python3 scripts/fault_report.py
 ```
 
+Sweep one fault parameter across a range, repeated over seeds. Each run
+restarts the whole stack, so this takes a while — `--dry-run` prints the plan
+and the estimate first:
+
+```bash
+python3 scripts/run_benchmark.py --dry-run
+```
+
+```bash
+python3 scripts/run_benchmark.py --experiment encoder_bias
+```
+
+```bash
+python3 scripts/run_benchmark.py --aggregate-only
+```
+
+The fifth experiment tests the local planner instead: navigate the corridor
+with and without an obstacle that is **not on the map**, paired per seed.
+
+```bash
+python3 scripts/run_navigation_benchmark.py --seeds 1 2 3
+```
+
 Regenerate the world after editing `configs/world.yaml`:
 
 ```bash

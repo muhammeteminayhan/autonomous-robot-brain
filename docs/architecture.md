@@ -84,7 +84,7 @@ The requested layout had a flat `ros2_ws/src` plus top-level `configs/` and
 | `arb_planning` | A*, Dijkstra, Dynamic Window Approach | C++ | 7, 8 |
 | `arb_control` | PID trajectory tracking | C++ | 9 |
 | `arb_bringup` | Top-level launch composition and parameter sets | CMake/Python | 1+ |
-| `arb_evaluation` | Offline metrics, plots, benchmark reports | Python | 5, 11 |
+| `arb_evaluation` | Fault-scenario scheduler, moving obstacle, offline metrics and benchmark reports | Python | 5, 10-11 |
 
 ### Why `arb_core` was added
 
