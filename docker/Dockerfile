@@ -30,6 +30,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3-pytest \
       python3-pytest-cov \
       ros-jazzy-ros-gz \
+      ros-jazzy-gz-transport-vendor \
+      ros-jazzy-gz-msgs-vendor \
       ros-jazzy-tf2-ros \
       ros-jazzy-tf2-geometry-msgs \
       ros-jazzy-robot-state-publisher \

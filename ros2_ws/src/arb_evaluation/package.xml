@@ -13,6 +13,14 @@
   <depend>geometry_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>arb_msgs</depend>
+
+  <!-- moving_obstacle.py talks to the simulator directly over gz-transport, to
+       spawn and teleport an obstacle that is deliberately absent from the ROS
+       graph. These come in transitively via ros_gz, but a package that imports
+       something declares it: a transitive dependency is one refactor in
+       somebody else's package away from disappearing. -->
+  <exec_depend>gz_transport_vendor</exec_depend>
+  <exec_depend>gz_msgs_vendor</exec_depend>
   <depend>python3-numpy</depend>
   <depend>python3-matplotlib</depend>
   <depend>python3-scipy</depend>
