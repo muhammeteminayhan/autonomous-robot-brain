@@ -39,7 +39,16 @@ The experiment Phase 10 could not run. Case C (0.05 rad/s) never recovered and C
 
 Phase 10's 60 % dropout was indistinguishable from nominal, because 40 % of 360 beams is still 144 and a likelihood field does not need many. This pushes it to where it does matter.
 
-*not run*
+![lidar_dropout](sweep_lidar_dropout.png)
+
+| dropout_ratio [fraction of beams discarded] | runs | EKF pos RMSE [m] | odom pos RMSE [m] | EKF heading RMSE [deg] | EKF recovered | EKF inside 2-sigma |
+|---|---|---|---|---|---|---|
+| 0 | 3 | 0.0311 ± 0.0018 | 0.0686 ± 0.0019 | 2.25 ± 0.11 | n/a | 89 % |
+| 0.3 | 3 | 0.0260 ± 0.0058 | 0.0681 ± 0.0014 | 2.35 ± 0.25 | 3 / 3 | 93 % |
+| 0.6 | 3 | 0.0256 ± 0.0034 | 0.0685 ± 0.0032 | 2.42 ± 0.21 | 3 / 3 | 95 % |
+| 0.8 | 3 | 0.0223 ± 0.0030 | 0.0680 ± 0.0011 | 2.14 ± 0.13 | 3 / 3 | 100 % |
+| 0.9 | 3 | 0.0235 ± 0.0009 | 0.0682 ± 0.0009 | 2.25 ± 0.08 | 3 / 3 | 98 % |
+| 0.97 | 3 | 0.0237 ± 0.0015 | 0.0674 ± 0.0022 | 2.24 ± 0.12 | 3 / 3 | 99 % |
 
 ## LiDAR outage duration
 

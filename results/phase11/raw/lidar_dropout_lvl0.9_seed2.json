@@ -1,0 +1,64 @@
+{
+  "scenario": "lidar_dropout_0p9",
+  "description": "LiDAR beam dropout at 0.9 fraction of beams discarded",
+  "aborted": null,
+  "fault_windows": [
+    {
+      "type": "lidar_dropout",
+      "onset_s": 15.0,
+      "end_s": 55.0,
+      "params": {
+        "burst_mode": false,
+        "dropout_ratio": 0.9
+      }
+    }
+  ],
+  "samples": 3832,
+  "estimators": {
+    "odometry": {
+      "duration_s": 94.67168831825256,
+      "distance_m": 15.042417940889777,
+      "position_rmse_m": 0.06939763877289963,
+      "position_max_m": 0.13061541399333756,
+      "position_final_m": 0.13027336205433523,
+      "heading_rmse_deg": 5.420355807330764,
+      "heading_max_deg": 10.201012265387279,
+      "position_rmse_healthy_m": 0.005275695225854137,
+      "position_rmse_degraded_m": 0.04655254081894205,
+      "position_rmse_recovered_m": 0.09694666270709658,
+      "heading_rmse_healthy_deg": 0.4584996703887939,
+      "heading_rmse_degraded_deg": 3.542409496025084,
+      "heading_rmse_recovered_deg": 7.61667440275842,
+      "recovery_band_m": 0.05,
+      "recovery_time_s": NaN,
+      "recovery_outcome": "did not recover",
+      "fraction_inside_2sigma_pos": 0.9994780793319415,
+      "fraction_inside_2sigma_heading": 1.0,
+      "reported_final_sigma_pos_m": 0.2840013881513276
+    },
+    "ekf": {
+      "duration_s": 94.67168831825256,
+      "distance_m": 15.042417940889777,
+      "position_rmse_m": 0.0246414445581068,
+      "position_max_m": 0.10773415388110233,
+      "position_final_m": 0.03684934411979976,
+      "heading_rmse_deg": 2.3541667348077797,
+      "heading_max_deg": 11.99374397989357,
+      "position_rmse_healthy_m": 0.014419630330015318,
+      "position_rmse_degraded_m": 0.020112943662648444,
+      "position_rmse_recovered_m": 0.0311537563495692,
+      "heading_rmse_healthy_deg": 1.6023517842799784,
+      "heading_rmse_degraded_deg": 2.156643303537258,
+      "heading_rmse_recovered_deg": 2.7588138248663916,
+      "recovery_band_m": 0.05,
+      "recovery_time_s": 0.0,
+      "recovery_outcome": "never left the band",
+      "fraction_inside_2sigma_pos": 0.9600730688935282,
+      "fraction_inside_2sigma_heading": 0.5511482254697286,
+      "reported_final_sigma_pos_m": 0.03957293687761481
+    }
+  },
+  "level": 0.9,
+  "seed": 2,
+  "experiment": "lidar_dropout"
+}

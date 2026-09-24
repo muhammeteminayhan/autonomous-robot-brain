@@ -235,6 +235,75 @@ suspected.
 
 ---
 
+## 4c. Eleven beams are enough
+
+Phase 10's Case D dropped 60 % of the LiDAR beams and came out indistinguishable
+from nominal, which was written up as "the scenario is not stressful" rather
+than as a pass. This pushes it to 97 %.
+
+![LiDAR dropout sweep](../results/phase11/sweep_lidar_dropout.png)
+
+| dropout | beams surviving | EKF pos RMSE [m] | EKF heading RMSE [deg] | inside 2-sigma |
+|---|---|---|---|---|
+| 0 | 360 | 0.0311 ± 0.0018 | 2.25 ± 0.11 | 89 % |
+| 0.3 | 252 | 0.0260 ± 0.0058 | 2.35 ± 0.25 | 93 % |
+| 0.6 | 144 | 0.0256 ± 0.0034 | 2.42 ± 0.21 | 95 % |
+| 0.8 | 72 | 0.0223 ± 0.0030 | 2.14 ± 0.13 | 100 % |
+| 0.9 | 36 | 0.0235 ± 0.0009 | 2.25 ± 0.08 | 98 % |
+| 0.97 | **11** | 0.0237 ± 0.0015 | 2.24 ± 0.12 | 99 % |
+
+**Throwing away 97 % of the LiDAR does not degrade the estimate.** Not
+slightly — not at all.
+
+### The fault really was applied
+
+A null result invites the suspicion that nothing happened, so: at 0.97 the
+preprocessor logged **139,546 beams dropped**, against the 139,680 predicted by
+400 scans x 360 beams x 0.97. And the scan matcher kept working on what was
+left — `92 accepted / 94 attempted` across the whole run, scoring 0.98.
+
+### Why this is not surprising once you count
+
+Eleven range returns spread around a full circle **over-determine** a 3-DOF
+pose in a closed rectangular room. Scan matching against a likelihood field
+does not need correspondences or features; it needs enough rays to pin down
+`x`, `y` and `θ`, and three would do it in principle. At 360 beams the problem
+is over-determined by two orders of magnitude.
+
+The useful engineering conclusion is the inverse of the obvious one: **this
+stack's LiDAR is massively over-specified for localisation in this
+environment.** What the extra beams buy is the *map* — occupancy grid coverage
+and resolution — not the pose.
+
+### The slight improvement is real but unexplained
+
+The trend is mildly *favourable*: 0.0311 m at no dropout against 0.0237 m at
+97 %, and covariance consistency rising from 89 % to 99 %. The difference is
+two to three times the run-to-run spread and consistent across every level, so
+it is unlikely to be noise.
+
+The mechanism is **not established**. A plausible one: adjacent beams hitting
+the same wall are strongly correlated, the matcher treats them as independent,
+and 360 of them therefore produce an over-confident match that the EKF then
+over-trusts. Fewer, sparser beams would be closer to genuinely independent and
+the reported covariance closer to honest — which is what the last column looks
+like. Another: fewer rays integrated per scan means less reinforcement of the
+current estimate in a map built at that estimate.
+
+Both are stories that fit. Distinguishing them needs an experiment this sweep
+does not contain, and it is written here as an open question rather than a
+finding.
+
+### And a limitation that matters more than the result
+
+This is a **closed 20 x 14 m room with structure in every direction**. A
+corridor with two blank parallel walls constrains one axis and leaves the other
+free, and eleven beams there would be nowhere near enough. The number 11 is not
+transferable; the reasoning — count the constraints against the degrees of
+freedom — is.
+
+---
+
 ## 5. The fifth experiment tests the planner, not the estimator
 
 Four sweeps degrade a **sensor**. The last one degrades the **world**: an
