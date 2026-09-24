@@ -107,11 +107,69 @@ pass.
 
 ## 4. Results
 
-<!-- FILLED IN FROM results/phase11/benchmark_report.md -->
+The generated tables and plots live in
+[`results/phase11/benchmark_report.md`](../results/phase11/benchmark_report.md),
+regenerated from the per-run metrics with:
+
+```bash
+python3 scripts/run_benchmark.py --aggregate-only
+```
+
+What follows is the reading of them, one experiment at a time. The per-run
+JSONs under `results/phase11/raw/` are the record; the tables are a view of
+them, and `--aggregate-only` re-derives every one without touching the
+simulator.
 
 ---
 
-## 4a. The encoder-bias threshold is real
+## 4a. The filter barely notices gyro noise, and that is the point
+
+![Gyro noise sweep](../results/phase11/sweep_gyro_noise.png)
+
+| noise x nominal | EKF pos RMSE [m] | odom pos RMSE [m] | EKF/odom | EKF heading RMSE [deg] | inside 2-sigma |
+|---|---|---|---|---|---|
+| 0.5 | 0.0276 ± 0.0039 | 0.0681 ± 0.0016 | 2.46x | 2.08 ± 0.07 | 93 % |
+| 1 | 0.0316 ± 0.0046 | 0.0678 ± 0.0018 | 2.14x | 2.24 ± 0.17 | 89 % |
+| 2 | 0.0280 ± 0.0071 | 0.0685 ± 0.0013 | 2.44x | 2.15 ± 0.18 | 93 % |
+| 5 | 0.0343 ± 0.0040 | 0.0682 ± 0.0013 | 1.99x | 2.39 ± 0.23 | 86 % |
+| 10 | 0.0432 ± 0.0042 | 0.0678 ± 0.0016 | 1.57x | 2.55 ± 0.27 | 85 % |
+| 20 | 0.0471 ± 0.0038 | 0.0681 ± 0.0011 | 1.44x | 2.64 ± 0.30 | 82 % |
+
+**A 40x change in gyro noise produces a 1.7x change in position error.** That
+is the Phase 10 Case B question — "does the filter down-weight a degraded
+sensor, or blindly trust it?" — answered with a curve instead of a point. It
+down-weights, and very effectively: the preprocessor widens the reported
+covariance along with the noise, the EKF believes the gyro less, and it leans
+on the encoders, which measure the same angular rate independently.
+
+That redundancy is the whole reason `ω` is a *state* rather than an input. A
+filter that took wheel odometry as a control input would have nothing to fall
+back on here.
+
+### Below 5x, buying a better gyro buys nothing
+
+0.5x, 1x and 2x come out at 0.0276, 0.0316 and 0.0280 m — **non-monotonic and
+inside the spread**. Halving the gyro noise is not measurably better than
+nominal, because the gyro is not the limiting factor. The scan matcher and the
+map are.
+
+As an engineering conclusion that is worth more than the degradation curve:
+*for this robot, on this route, a quieter IMU is wasted money.*
+
+### The odometry column proves the experiment works
+
+Wheel odometry does not consume the IMU, and its error is flat across the whole
+sweep — 0.0678 to 0.0685 m, a span of 1 %. Its run-to-run spread is **±2 %**.
+
+Two things follow. The control behaves exactly as a control should, so the
+setup is measuring what it claims to. And since the EKF's spread is **±15 %**
+against odometry's ±2 %, the EKF's variability is **not coming from the
+sensors** — it comes from the mapping and scan-matching loop, which is the same
+mechanism that produces the encoder-bias threshold below.
+
+---
+
+## 4b. The encoder-bias threshold is real
 
 Phase 10 left a hypothesis it could not test. Case C (0.05 rad/s) never
 recovered; Case F (0.04 rad/s) recovered in 1.4 s. Two variables differed

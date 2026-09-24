@@ -1,0 +1,64 @@
+{
+  "scenario": "gyro_noise_1",
+  "description": "Gyroscope noise at 1 x nominal sigma",
+  "aborted": null,
+  "fault_windows": [
+    {
+      "type": "imu_high_noise",
+      "onset_s": 15.0,
+      "end_s": 55.0,
+      "params": {
+        "affect_accelerometer": false,
+        "noise_scale": 1.0
+      }
+    }
+  ],
+  "samples": 3840,
+  "estimators": {
+    "odometry": {
+      "duration_s": 94.72213959693909,
+      "distance_m": 15.056426699545197,
+      "position_rmse_m": 0.06937860590492989,
+      "position_max_m": 0.13126215514252426,
+      "position_final_m": 0.131139833765123,
+      "heading_rmse_deg": 5.435083036414043,
+      "heading_max_deg": 10.196240146339184,
+      "position_rmse_healthy_m": 0.005631295251111996,
+      "position_rmse_degraded_m": 0.046690722736921625,
+      "position_rmse_recovered_m": 0.09677499967746998,
+      "heading_rmse_healthy_deg": 0.4736725922364344,
+      "heading_rmse_degraded_deg": 3.57493501615605,
+      "heading_rmse_recovered_deg": 7.621152281233937,
+      "recovery_band_m": 0.05,
+      "recovery_time_s": NaN,
+      "recovery_outcome": "did not recover",
+      "fraction_inside_2sigma_pos": 0.9989583333333333,
+      "fraction_inside_2sigma_heading": 1.0,
+      "reported_final_sigma_pos_m": 0.2851807875305599
+    },
+    "ekf": {
+      "duration_s": 94.72213959693909,
+      "distance_m": 15.056426699545197,
+      "position_rmse_m": 0.030064261187217257,
+      "position_max_m": 0.10689221080607418,
+      "position_final_m": 0.044589805293191655,
+      "heading_rmse_deg": 2.1735127316967118,
+      "heading_max_deg": 11.400698426780071,
+      "position_rmse_healthy_m": 0.015920919652534893,
+      "position_rmse_degraded_m": 0.02341699909495749,
+      "position_rmse_recovered_m": 0.03899034520195547,
+      "heading_rmse_healthy_deg": 1.579401617313921,
+      "heading_rmse_degraded_deg": 2.1219695322702705,
+      "heading_rmse_recovered_deg": 2.4102251952827696,
+      "recovery_band_m": 0.05,
+      "recovery_time_s": 0.0,
+      "recovery_outcome": "never left the band",
+      "fraction_inside_2sigma_pos": 0.8440104166666667,
+      "fraction_inside_2sigma_heading": 0.42864583333333334,
+      "reported_final_sigma_pos_m": 0.01843705531915955
+    }
+  },
+  "level": 1.0,
+  "seed": 2,
+  "experiment": "gyro_noise"
+}

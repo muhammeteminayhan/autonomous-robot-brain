@@ -8,7 +8,16 @@ Run length 75 s, spawn `odometry_test`, open-loop route. These numbers are NOT d
 
 How much gyro noise can the filter absorb before it stops beating dead reckoning? Covers both the low-noise and high-noise ends in one sweep, which shows the shape of the response rather than two points on it.
 
-*not run*
+![gyro_noise](sweep_gyro_noise.png)
+
+| noise_scale [x nominal sigma] | runs | EKF pos RMSE [m] | odom pos RMSE [m] | EKF heading RMSE [deg] | EKF recovered | EKF inside 2-sigma |
+|---|---|---|---|---|---|---|
+| 0.5 | 3 | 0.0276 ± 0.0039 | 0.0681 ± 0.0016 | 2.08 ± 0.07 | 3 / 3 | 93 % |
+| 1 | 3 | 0.0316 ± 0.0046 | 0.0678 ± 0.0018 | 2.24 ± 0.17 | 3 / 3 | 89 % |
+| 2 | 3 | 0.0280 ± 0.0071 | 0.0685 ± 0.0013 | 2.15 ± 0.18 | 3 / 3 | 93 % |
+| 5 | 3 | 0.0343 ± 0.0040 | 0.0682 ± 0.0013 | 2.39 ± 0.23 | 3 / 3 | 86 % |
+| 10 | 3 | 0.0432 ± 0.0042 | 0.0678 ± 0.0016 | 2.55 ± 0.27 | 3 / 3 | 85 % |
+| 20 | 3 | 0.0471 ± 0.0038 | 0.0681 ± 0.0011 | 2.64 ± 0.30 | 2 / 3 | 82 % |
 
 ## One-wheel encoder bias
 
