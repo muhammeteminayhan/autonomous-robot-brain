@@ -20,14 +20,24 @@ compile_commands.json
 results/**/*.bag
 results/**/*.db3
 results/**/*.mcap
-results/**/raw/
-experiments/**/raw/
+# `results/**/raw/*` and not `results/**/raw/`: git will not descend into an
+# excluded DIRECTORY, so a trailing-slash rule makes the negations below
+# unreachable and silently drops the per-run metrics with the bulk data.
+results/**/raw/*
+experiments/**/raw/*
 *.log
 
 # Plots and benchmark tables ARE versioned (they are the deliverable):
 !results/**/*.png
 !results/**/*.csv
 !results/**/*.md
+
+# So are the per-run metrics under raw/. They are the RECORD -- every
+# aggregate table and plot is derived from them, and `run_benchmark.py
+# --aggregate-only` re-derives the report from them without touching the
+# simulator. A clone without them cannot reproduce or correct a single number.
+# They are also tiny: ~2 KB each.
+!results/**/raw/*.json
 
 # ---- Gazebo ----
 .gazebo/

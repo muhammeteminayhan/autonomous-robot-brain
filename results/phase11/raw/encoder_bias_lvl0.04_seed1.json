@@ -1,0 +1,65 @@
+{
+  "scenario": "encoder_bias_0p04",
+  "description": "One-wheel encoder bias at 0.04 rad/s",
+  "aborted": null,
+  "fault_windows": [
+    {
+      "type": "encoder_drift",
+      "onset_s": 15.0,
+      "end_s": 55.0,
+      "params": {
+        "wheel": "right",
+        "ramp_time_s": 5.0,
+        "bias_rad_s": 0.04
+      }
+    }
+  ],
+  "samples": 3860,
+  "estimators": {
+    "odometry": {
+      "duration_s": 94.6832058429718,
+      "distance_m": 15.048419670388833,
+      "position_rmse_m": 0.21878071471552213,
+      "position_max_m": 0.3781118431872158,
+      "position_final_m": 0.37796565393807724,
+      "heading_rmse_deg": 17.183287509640603,
+      "heading_max_deg": 25.701621233589112,
+      "position_rmse_healthy_m": 0.006549514552020306,
+      "position_rmse_degraded_m": 0.15342812401340278,
+      "position_rmse_recovered_m": 0.301760266902419,
+      "heading_rmse_healthy_deg": 0.4721187013128541,
+      "heading_rmse_degraded_deg": 12.368550693656193,
+      "heading_rmse_recovered_deg": 23.532983256233948,
+      "recovery_band_m": 0.05,
+      "recovery_time_s": NaN,
+      "recovery_outcome": "did not recover",
+      "fraction_inside_2sigma_pos": 0.9992227979274612,
+      "fraction_inside_2sigma_heading": 1.0,
+      "reported_final_sigma_pos_m": 0.2827162239677979
+    },
+    "ekf": {
+      "duration_s": 94.6832058429718,
+      "distance_m": 15.048419670388833,
+      "position_rmse_m": 0.06677221264729874,
+      "position_max_m": 0.18423497344952744,
+      "position_final_m": 0.13101633483551356,
+      "heading_rmse_deg": 5.304458758279065,
+      "heading_max_deg": 18.225488938377502,
+      "position_rmse_healthy_m": 0.014502935348833065,
+      "position_rmse_degraded_m": 0.041940979321600846,
+      "position_rmse_recovered_m": 0.09405134520342587,
+      "heading_rmse_healthy_deg": 1.5856270583426917,
+      "heading_rmse_degraded_deg": 3.336389290662936,
+      "heading_rmse_recovered_deg": 7.438915864818601,
+      "recovery_band_m": 0.05,
+      "recovery_time_s": 2.0434343814849854,
+      "recovery_outcome": "recovered",
+      "fraction_inside_2sigma_pos": 0.4976683937823834,
+      "fraction_inside_2sigma_heading": 0.21528497409326425,
+      "reported_final_sigma_pos_m": 0.01907477369778743
+    }
+  },
+  "level": 0.04,
+  "seed": 1,
+  "experiment": "encoder_bias"
+}
