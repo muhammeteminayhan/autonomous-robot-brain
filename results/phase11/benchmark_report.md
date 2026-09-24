@@ -1,0 +1,39 @@
+# Phase 11 — benchmark sweeps
+
+Every point is the mean over 3 seeds; `±` is the population standard deviation across them, not a standard error — three samples cannot support a confidence interval.
+
+Run length 75 s, spawn `odometry_test`, open-loop route. These numbers are NOT directly comparable with Phase 10's 120 s runs: a dead-reckoning error grows with distance travelled.
+
+## Gyroscope noise
+
+How much gyro noise can the filter absorb before it stops beating dead reckoning? Covers both the low-noise and high-noise ends in one sweep, which shows the shape of the response rather than two points on it.
+
+*not run*
+
+## One-wheel encoder bias
+
+The experiment Phase 10 could not run. Case C (0.05 rad/s) never recovered and Case F (0.04 rad/s) recovered in 1.4 s, but those two runs differed in more than magnitude and each was a single sample. Sweeping the magnitude alone, repeated over seeds, is what decides whether there is a recovery threshold or whether that was noise.
+
+![encoder_bias](sweep_encoder_bias.png)
+
+| bias_rad_s [rad/s] | runs | EKF pos RMSE [m] | odom pos RMSE [m] | EKF heading RMSE [deg] | EKF recovered | EKF inside 2-sigma |
+|---|---|---|---|---|---|---|
+| 0 | 3 | 0.0262 ± 0.0051 | 0.0680 ± 0.0011 | 2.15 ± 0.17 | n/a | 97 % |
+| 0.01 | 3 | 0.0328 ± 0.0027 | 0.1064 ± 0.0032 | 2.60 ± 0.10 | 3 / 3 | 92 % |
+| 0.02 | 3 | 0.0455 ± 0.0030 | 0.1433 ± 0.0016 | 3.32 ± 0.40 | 3 / 3 | 82 % |
+| 0.03 | 3 | 0.0605 ± 0.0020 | 0.1827 ± 0.0023 | 4.60 ± 0.19 | 3 / 3 | 68 % |
+| 0.04 | 3 | 0.0635 ± 0.0034 | 0.2193 ± 0.0015 | 4.88 ± 0.31 | 3 / 3 | 67 % |
+| 0.05 | 3 | 0.0803 ± 0.0049 | 0.2575 ± 0.0016 | 6.25 ± 0.41 | 1 / 3 | 60 % |
+| 0.07 | 3 | 0.1149 ± 0.0048 | 0.3338 ± 0.0011 | 9.07 ± 0.43 | 0 / 3 | 45 % |
+
+## LiDAR beam dropout
+
+Phase 10's 60 % dropout was indistinguishable from nominal, because 40 % of 360 beams is still 144 and a likelihood field does not need many. This pushes it to where it does matter.
+
+*not run*
+
+## LiDAR outage duration
+
+The LiDAR is the only ABSOLUTE measurement in the stack; everything else is a rate, and rates only say how much things have changed. This sweeps how long the filter can go without one and still come back.
+
+*not run*

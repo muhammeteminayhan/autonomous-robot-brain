@@ -111,6 +111,72 @@ pass.
 
 ---
 
+## 4a. The encoder-bias threshold is real
+
+Phase 10 left a hypothesis it could not test. Case C (0.05 rad/s) never
+recovered; Case F (0.04 rad/s) recovered in 1.4 s. Two variables differed
+between those runs and each was a single sample, so it was written up as "the
+experiment Phase 11 should run". This is that experiment, and the hypothesis
+survives.
+
+![Encoder bias sweep](../results/phase11/sweep_encoder_bias.png)
+
+| bias [rad/s] | EKF pos RMSE [m] | odom pos RMSE [m] | EKF recovered | inside 2-sigma |
+|---|---|---|---|---|
+| 0 | 0.0262 ± 0.0051 | 0.0680 ± 0.0011 | n/a | 97 % |
+| 0.01 | 0.0328 ± 0.0027 | 0.1064 ± 0.0032 | 3 / 3 | 92 % |
+| 0.02 | 0.0455 ± 0.0030 | 0.1433 ± 0.0016 | 3 / 3 | 82 % |
+| 0.03 | 0.0605 ± 0.0020 | 0.1827 ± 0.0023 | 3 / 3 | 68 % |
+| 0.04 | 0.0635 ± 0.0034 | 0.2193 ± 0.0015 | 3 / 3 | 67 % |
+| **0.05** | 0.0803 ± 0.0049 | 0.2575 ± 0.0016 | **1 / 3** | 60 % |
+| 0.07 | 0.1149 ± 0.0048 | 0.3338 ± 0.0011 | **0 / 3** | 45 % |
+
+Per-seed, the transition is sharper than the summary suggests:
+
+```
+0.01 - 0.03   never left the band          3/3   the fault is absorbed entirely
+0.04          never left 2/3, recovered 1/3      the transition begins
+0.05          recovered 1/3, did not 2/3         the threshold
+0.07          did not recover              3/3
+```
+
+**There is a recovery threshold, and it sits between 0.04 and 0.05 rad/s** for
+this route and this fault duration. Phase 10's two single runs both fall
+exactly where the sweep says they should — Case C at 0.05 landing in the 2/3
+that fail, Case F at 0.04 in the 3/3 that recover.
+
+A level that comes out 1/3 is what a threshold looks like from three samples:
+not a clean edge, but the point where the outcome becomes **seed-dependent**.
+Where exactly it sits is not established — three seeds locate a transition
+between two levels, not within one.
+
+### The covariance consistency is the cleanest result in the project
+
+Look at the last column. It falls **monotonically, 97 % to 45 %**, across a
+sweep in which nothing about the filter changed.
+
+This is the self-referential map quantified. As the bias grows, the drift grows
+with it, and the map — built at the EKF's own estimated pose — drifts along.
+Scan matching against that map keeps returning small corrections at high
+scores, so the filter's reported covariance stays tight while its actual error
+grows. The more **systematic** the error, the more confidently wrong the filter
+becomes.
+
+A filter whose error grows while its covariance does not is worse than a bad
+filter, because everything downstream believes it. That is not visible in a
+position RMSE column, which grows smoothly and unremarkably across the same
+sweep.
+
+### The spreads say these are effects, not noise
+
+`±` at the control level is 0.0051 m on 0.0262 m — **±19 % scatter between
+runs at identical conditions**. Every difference in the table above is several
+times that. It also settles a Phase 10 loose end: the 76 %-vs-92 % covariance
+gap between Case A and Case D there was run-to-run variation, exactly as
+suspected.
+
+---
+
 ## 5. The fifth experiment tests the planner, not the estimator
 
 Four sweeps degrade a **sensor**. The last one degrades the **world**: an

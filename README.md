@@ -804,7 +804,8 @@ to work until it has been executed.
 | `colcon build` | ✅ verified | 11/11 packages, zero stderr |
 | Unit tests (`colcon test`) | ✅ verified | **273 tests, 0 failures** |
 | Integration tests (`pytest tests/integration`) | ✅ verified | **94 passed, 1 skipped** |
-| Unit tests are not vacuous | ✅ verified | 41 deliberate mutations injected across five packages; all caught (10 escaped first and the tests were strengthened; 1 was an equivalent mutant and was removed) |
+| Unit tests are not vacuous | ✅ verified | **60 code mutations** injected across six packages; all caught (11 escaped first and the tests were strengthened; 1 was an equivalent mutant and was removed) |
+| Guard tests actually bite | ✅ verified | 8 probes against the isolation, config-consistency and docs-consistency guards; every one fails the guard it targets and passes once reverted |
 | Planner benchmark | ✅ measured | [results/phase7/planner_benchmark.csv](results/phase7/planner_benchmark.csv) |
 | Ground-truth isolation guard | ✅ verified | passes, and fails correctly when a violation is injected |
 | URDF matches `configs/robot.yaml` | ✅ verified | every dimension compared in `test_urdf_model.py` |
@@ -871,6 +872,14 @@ to work until it has been executed.
 - Hardware validation on a physical differential-drive platform.
 
 ---
+
+## Project report
+
+[`docs/project-report.md`](docs/project-report.md) is the single document to
+read before explaining this project to somebody else: repository tree,
+architecture, algorithms, the mathematics that matters, test and benchmark
+results, what every file does, the run commands, what to learn next, and how to
+describe it on a CV and in an interview.
 
 ## Learning notes
 
