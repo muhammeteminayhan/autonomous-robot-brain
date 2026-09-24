@@ -31,7 +31,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_ROOT = REPO_ROOT / "ros2_ws" / "src"
 
 #: Packages that form the live estimation/decision pipeline. ``arb_evaluation``
-#: is deliberately absent -- it is *supposed* to read ground truth.
+#: is deliberately absent -- it is *supposed* to read ground truth, and it is
+#: also what publishes the fault state.
 ESTIMATION_PACKAGES = (
     "arb_sensors",
     "arb_localization",
@@ -47,12 +48,45 @@ FORBIDDEN_PATTERNS = (
     r"\bgt_pose\b",
     r"\btrue_pose\b",
     r"\bperfect_odom\b",
+    # Phase 10's fault state is instrumentation, and privileged in exactly the
+    # same way ground truth is: it says which sensor is currently lying. An
+    # estimator that reads it could down-weight the bad sensor by being TOLD
+    # rather than by noticing, which is a different and much easier problem
+    # than the one this project claims to solve. arb_msgs/FaultState.msg states
+    # the rule; this is what enforces it.
+    #
+    # Matched via `arb_msgs` or the topic name, NOT on "FaultState" alone: the
+    # sensor nodes have their own local ImuFaultState / LidarFaultState /
+    # EncoderFaultState structs holding the knob values they were configured
+    # with, which is exactly what they are supposed to have.
+    # `fault_?state`, not `FaultState`: ROS generates the C++ header as
+    # arb_msgs/msg/fault_state.hpp, and re.IGNORECASE does not bridge an
+    # underscore. The CamelCase-only pattern let that include through.
+    r"arb_msgs.{0,20}fault_?state",
+    r"/arb/fault",
 )
 
 SOURCE_SUFFIXES = {".cpp", ".hpp", ".h", ".cc", ".py", ".yaml", ".yml", ".xml", ".launch"}
 
-#: Lines that merely *say* the rule (comments, this file's siblings) are fine.
-_COMMENT_PREFIXES = ("//", "#", "*", "<!--", "/*")
+#: Lines that merely *say* the rule are fine, so comments are skipped -- but
+#: what counts as a comment DEPENDS ON THE LANGUAGE, and getting that wrong
+#: opened a hole in this very check.
+#:
+#: A single list containing "#" treated every C++ `#include` as a comment, so
+#: the static check had never once inspected an include line. An estimation
+#: node could `#include "arb_msgs/msg/fault_state.hpp"` -- or any ground-truth
+#: header -- and this test would pass. Verified by injecting exactly that.
+_COMMENT_PREFIXES_BY_SUFFIX = {
+    ".cpp": ("//", "*", "/*"),
+    ".hpp": ("//", "*", "/*"),
+    ".h": ("//", "*", "/*"),
+    ".cc": ("//", "*", "/*"),
+    ".xml": ("<!--", "-->"),
+    ".launch": ("<!--", "-->"),
+    ".py": ("#",),
+    ".yaml": ("#",),
+    ".yml": ("#",),
+}
 
 
 def _iter_source_files():
@@ -65,9 +99,30 @@ def _iter_source_files():
                 yield package, path
 
 
-def _is_comment(line: str) -> bool:
+def _is_comment(line: str, suffix: str) -> bool:
     stripped = line.strip()
-    return any(stripped.startswith(p) for p in _COMMENT_PREFIXES)
+    # An unknown suffix is treated as having NO comment syntax, so a new file
+    # type is over-reported rather than silently exempted.
+    prefixes = _COMMENT_PREFIXES_BY_SUFFIX.get(suffix, ())
+    return any(stripped.startswith(p) for p in prefixes)
+
+
+def test_comment_detection_is_language_aware():
+    """A C++ `#include` is not a comment, whatever Python thinks of `#`.
+
+    This is the property that a single shared prefix list got wrong, and the
+    consequence was that the static check below never inspected an include
+    line in any C++ file in the project.
+    """
+    assert _is_comment("// a note", ".cpp")
+    assert not _is_comment('#include "arb_msgs/msg/fault_state.hpp"', ".cpp")
+    assert not _is_comment('#include "x.hpp"', ".hpp")
+    assert _is_comment("# a note", ".py")
+    assert _is_comment("# a note", ".yaml")
+    assert not _is_comment("topic: /arb/ground_truth/odom", ".yaml")
+    assert _is_comment("<!-- a note -->", ".xml")
+    # An unrecognised suffix must not be silently exempt.
+    assert not _is_comment("# anything", ".txt")
 
 
 def test_estimation_packages_exist():
@@ -87,7 +142,7 @@ def test_no_estimation_source_references_ground_truth():
         except OSError:  # pragma: no cover - unreadable file is a real problem
             continue
         for lineno, line in enumerate(text.splitlines(), start=1):
-            if _is_comment(line):
+            if _is_comment(line, path.suffix):
                 continue
             for pattern in compiled:
                 if pattern.search(line):
@@ -109,7 +164,11 @@ def _ros2(*args: str) -> str:
 
 @pytest.mark.integration
 def test_running_graph_has_no_ground_truth_subscribers():
-    """Inspect the live graph; skip cleanly when nothing is running."""
+    """Inspect the live graph; skip cleanly when nothing is running.
+
+    Covers the fault state as well as ground truth: both are privileged
+    knowledge that no estimator is allowed to have.
+    """
     try:
         node_list = _ros2("node", "list").split()
     except (FileNotFoundError, subprocess.SubprocessError):

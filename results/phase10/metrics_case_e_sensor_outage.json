@@ -1,0 +1,68 @@
+{
+  "scenario": "case_e_sensor_outage",
+  "description": "Complete IMU outage 30-40 s; complete LiDAR outage 70-80 s.",
+  "aborted": null,
+  "fault_windows": [
+    {
+      "type": "sensor_outage",
+      "onset_s": 30.0,
+      "end_s": 40.0,
+      "params": {
+        "sensor": "imu"
+      }
+    },
+    {
+      "type": "sensor_outage",
+      "onset_s": 70.0,
+      "end_s": 80.0,
+      "params": {
+        "sensor": "lidar"
+      }
+    }
+  ],
+  "samples": 5097,
+  "estimators": {
+    "odometry": {
+      "duration_s": 125.29709219932556,
+      "distance_m": 20.07583409996826,
+      "position_rmse_m": 0.09768140181040225,
+      "position_max_m": 0.18618572547016773,
+      "position_final_m": 0.18207013170143882,
+      "heading_rmse_deg": 7.598206086341834,
+      "heading_max_deg": 13.872840409724052,
+      "position_rmse_healthy_m": 0.0269405018072436,
+      "position_rmse_degraded_m": 0.08176842759395554,
+      "position_rmse_recovered_m": 0.14128589614001671,
+      "heading_rmse_healthy_deg": 1.5024297830754993,
+      "heading_rmse_degraded_deg": 5.978798010700206,
+      "heading_rmse_recovered_deg": 11.11762543493889,
+      "recovery_band_m": 0.0538810036144872,
+      "recovery_time_s": NaN,
+      "recovery_outcome": "did not recover",
+      "fraction_inside_2sigma_pos": 0.9996076123209732,
+      "fraction_inside_2sigma_heading": 1.0,
+      "reported_final_sigma_pos_m": 0.3358989879238491
+    },
+    "ekf": {
+      "duration_s": 125.29709219932556,
+      "distance_m": 20.07583409996826,
+      "position_rmse_m": 0.057816197406053926,
+      "position_max_m": 0.1520947091275894,
+      "position_final_m": 0.11791770445016753,
+      "heading_rmse_deg": 3.1994586099425377,
+      "heading_max_deg": 13.896046077685336,
+      "position_rmse_healthy_m": 0.018847559447280535,
+      "position_rmse_degraded_m": 0.06469483503371722,
+      "position_rmse_recovered_m": 0.07451986657647078,
+      "heading_rmse_healthy_deg": 1.837937786771365,
+      "heading_rmse_degraded_deg": 3.234569692963776,
+      "heading_rmse_recovered_deg": 3.9703198275125766,
+      "recovery_band_m": 0.05,
+      "recovery_time_s": 0.906444787979126,
+      "recovery_outcome": "recovered",
+      "fraction_inside_2sigma_pos": 0.5575828918971945,
+      "fraction_inside_2sigma_heading": 0.2012948793407887,
+      "reported_final_sigma_pos_m": 0.0397214495834534
+    }
+  }
+}

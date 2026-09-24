@@ -1,0 +1,51 @@
+{
+  "scenario": "case_a_nominal",
+  "description": "All sensors healthy at their datasheet noise levels.",
+  "aborted": null,
+  "fault_windows": [],
+  "samples": 5113,
+  "estimators": {
+    "odometry": {
+      "duration_s": 125.22000026702881,
+      "distance_m": 20.05958709021687,
+      "position_rmse_m": 0.09995883638715332,
+      "position_max_m": 0.19806980028157542,
+      "position_final_m": 0.1794042529168525,
+      "heading_rmse_deg": 7.764492141792447,
+      "heading_max_deg": 14.120579433298273,
+      "position_rmse_healthy_m": 0.09995883638715332,
+      "position_rmse_degraded_m": NaN,
+      "position_rmse_recovered_m": NaN,
+      "heading_rmse_healthy_deg": 7.764492141792447,
+      "heading_rmse_degraded_deg": NaN,
+      "heading_rmse_recovered_deg": NaN,
+      "recovery_band_m": 0.19991767277430664,
+      "recovery_time_s": NaN,
+      "recovery_outcome": "no fault",
+      "fraction_inside_2sigma_pos": 0.9996088402112263,
+      "fraction_inside_2sigma_heading": 1.0,
+      "reported_final_sigma_pos_m": 0.33055650524062735
+    },
+    "ekf": {
+      "duration_s": 125.22000026702881,
+      "distance_m": 20.05958709021687,
+      "position_rmse_m": 0.04515891021081775,
+      "position_max_m": 0.14381316033755837,
+      "position_final_m": 0.10849560413831041,
+      "heading_rmse_deg": 2.9712163392954323,
+      "heading_max_deg": 13.833543421381538,
+      "position_rmse_healthy_m": 0.04515891021081775,
+      "position_rmse_degraded_m": NaN,
+      "position_rmse_recovered_m": NaN,
+      "heading_rmse_healthy_deg": 2.9712163392954323,
+      "heading_rmse_degraded_deg": NaN,
+      "heading_rmse_recovered_deg": NaN,
+      "recovery_band_m": 0.0903178204216355,
+      "recovery_time_s": NaN,
+      "recovery_outcome": "no fault",
+      "fraction_inside_2sigma_pos": 0.7588499902210053,
+      "fraction_inside_2sigma_heading": 0.20966164678271074,
+      "reported_final_sigma_pos_m": 0.017902995910572386
+    }
+  }
+}

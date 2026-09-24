@@ -1,0 +1,61 @@
+{
+  "scenario": "case_b_imu_high_noise",
+  "description": "Gyroscope noise inflated 10x from t = 20 s onwards.",
+  "aborted": null,
+  "fault_windows": [
+    {
+      "type": "imu_high_noise",
+      "onset_s": 20.0,
+      "end_s": 95.0,
+      "params": {
+        "noise_scale": 10.0,
+        "affect_accelerometer": true
+      }
+    }
+  ],
+  "samples": 5101,
+  "estimators": {
+    "odometry": {
+      "duration_s": 125.24283480644226,
+      "distance_m": 20.066080356248474,
+      "position_rmse_m": 0.09938428477272333,
+      "position_max_m": 0.19181325932519966,
+      "position_final_m": 0.18440165272567474,
+      "heading_rmse_deg": 7.749858633191527,
+      "heading_max_deg": 14.061322208699922,
+      "position_rmse_healthy_m": 0.010629699800279871,
+      "position_rmse_degraded_m": 0.08379723344309263,
+      "position_rmse_recovered_m": 0.15432476050037447,
+      "heading_rmse_healthy_deg": 0.9347894938669618,
+      "heading_rmse_degraded_deg": 6.4078371822364355,
+      "heading_rmse_recovered_deg": 12.201270576079814,
+      "recovery_band_m": 0.05,
+      "recovery_time_s": NaN,
+      "recovery_outcome": "did not recover",
+      "fraction_inside_2sigma_pos": 0.9996079200156832,
+      "fraction_inside_2sigma_heading": 1.0,
+      "reported_final_sigma_pos_m": 0.33627100080831684
+    },
+    "ekf": {
+      "duration_s": 125.24283480644226,
+      "distance_m": 20.066080356248474,
+      "position_rmse_m": 0.06208839442373304,
+      "position_max_m": 0.1845202635523502,
+      "position_final_m": 0.14230816875291372,
+      "heading_rmse_deg": 4.301176269990457,
+      "heading_max_deg": 15.839050520766623,
+      "position_rmse_healthy_m": 0.01710887698472347,
+      "position_rmse_degraded_m": 0.05352196594377917,
+      "position_rmse_recovered_m": 0.09385797493831557,
+      "heading_rmse_healthy_deg": 1.8188385879899445,
+      "heading_rmse_degraded_deg": 4.01326465136424,
+      "heading_rmse_recovered_deg": 5.912658633866832,
+      "recovery_band_m": 0.05,
+      "recovery_time_s": 14.924036979675293,
+      "recovery_outcome": "recovered",
+      "fraction_inside_2sigma_pos": 0.6459517741619291,
+      "fraction_inside_2sigma_heading": 0.3377769064889237,
+      "reported_final_sigma_pos_m": 0.03365313455056845
+    }
+  }
+}

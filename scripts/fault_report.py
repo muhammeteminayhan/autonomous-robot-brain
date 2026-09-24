@@ -88,6 +88,10 @@ def table(data: dict, estimator: str) -> str:
             rec_text = "n/a"
         elif outcome == "did not recover":
             rec_text = "**never**"
+        elif outcome == "never left the band":
+            # Not the same claim as "recovered in 0.0 s": the fault never
+            # pushed the error out of the healthy band in the first place.
+            rec_text = "not perturbed"
         else:
             rec_text = fmt(rec, ".1f")
         inside = m.get("fraction_inside_2sigma_pos")

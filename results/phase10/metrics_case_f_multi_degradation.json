@@ -1,0 +1,80 @@
+{
+  "scenario": "case_f_multi_degradation",
+  "description": "Encoder drift + 5x IMU noise + 30 % LiDAR dropout, overlapping.",
+  "aborted": null,
+  "fault_windows": [
+    {
+      "type": "encoder_drift",
+      "onset_s": 20.0,
+      "end_s": 95.0,
+      "params": {
+        "wheel": "left",
+        "bias_rad_s": 0.04,
+        "ramp_time_s": 5.0
+      }
+    },
+    {
+      "type": "imu_high_noise",
+      "onset_s": 40.0,
+      "end_s": 85.0,
+      "params": {
+        "noise_scale": 5.0,
+        "affect_accelerometer": false
+      }
+    },
+    {
+      "type": "lidar_dropout",
+      "onset_s": 50.0,
+      "end_s": 95.0,
+      "params": {
+        "dropout_ratio": 0.3,
+        "burst_mode": false
+      }
+    }
+  ],
+  "samples": 5115,
+  "estimators": {
+    "odometry": {
+      "duration_s": 125.27398204803467,
+      "distance_m": 20.071831442350764,
+      "position_rmse_m": 0.1747193220300667,
+      "position_max_m": 0.36130010303215415,
+      "position_final_m": 0.3026822395015198,
+      "heading_rmse_deg": 13.095958075333636,
+      "heading_max_deg": 21.476543852299976,
+      "position_rmse_healthy_m": 0.01062663237706941,
+      "position_rmse_degraded_m": 0.15622542111697577,
+      "position_rmse_recovered_m": 0.2594090670542304,
+      "heading_rmse_healthy_deg": 0.9590897047037558,
+      "heading_rmse_degraded_deg": 11.5287684722223,
+      "heading_rmse_recovered_deg": 19.715408830984785,
+      "recovery_band_m": 0.05,
+      "recovery_time_s": NaN,
+      "recovery_outcome": "did not recover",
+      "fraction_inside_2sigma_pos": 0.9992179863147606,
+      "fraction_inside_2sigma_heading": 1.0,
+      "reported_final_sigma_pos_m": 0.342375115735786
+    },
+    "ekf": {
+      "duration_s": 125.27398204803467,
+      "distance_m": 20.071831442350764,
+      "position_rmse_m": 0.06438447671913565,
+      "position_max_m": 0.22068444665097314,
+      "position_final_m": 0.10730288369393674,
+      "heading_rmse_deg": 4.381408439648769,
+      "heading_max_deg": 15.622907369058208,
+      "position_rmse_healthy_m": 0.01734252968230426,
+      "position_rmse_degraded_m": 0.05439096630818774,
+      "position_rmse_recovered_m": 0.09928442820880828,
+      "heading_rmse_healthy_deg": 1.7821892364109104,
+      "heading_rmse_degraded_deg": 3.5557859958138063,
+      "heading_rmse_recovered_deg": 6.865680939950271,
+      "recovery_band_m": 0.05,
+      "recovery_time_s": 1.4324674606323242,
+      "recovery_outcome": "recovered",
+      "fraction_inside_2sigma_pos": 0.703030303030303,
+      "fraction_inside_2sigma_heading": 0.3262952101661779,
+      "reported_final_sigma_pos_m": 0.02733243744698704
+    }
+  }
+}

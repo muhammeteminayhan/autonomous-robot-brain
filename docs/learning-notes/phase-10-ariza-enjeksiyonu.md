@@ -175,8 +175,61 @@ f-string kullan.
 
 ## Sonuçlar
 
-Tablo için: [`docs/fault-injection.md`](../fault-injection.md) bölüm 5, ve
-`results/phase10/summary.md`.
+| Vaka | Senaryo | Pozisyon RMSE [m] | A'ya göre | Yön RMSE [deg] | A'ya göre | Bozuk faz poz. RMSE [m] | Toparlanma [s] | 2-sigma içinde |
+|---|---|---|---|---|---|---|---|---|
+| A | Nominal | 0.0452 | 1.00x | 2.97 | 1.00x | -- | n/a | 76 % |
+| B | IMU noise x10 | 0.0621 | 1.37x | 4.30 | 1.45x | 0.0535 | 14.9 | 65 % |
+| C | Encoder drift | 0.1646 | 3.64x | 12.54 | 4.22x | 0.1162 | **asla** | 47 % |
+| D | LiDAR dropout 60 % | 0.0352 | 0.78x | 2.60 | 0.88x | 0.0332 | hiç sapmadı | 92 % |
+| E | Sensor outage 10 s | 0.0578 | 1.28x | 3.20 | 1.08x | 0.0647 | 0.9 | 56 % |
+| F | Multi-degradation | 0.0644 | 1.43x | 4.38 | 1.47x | 0.0544 | 1.4 | 70 % |
+
+Tekerlek odometrisi **kontrol grubu** olarak yanında koşuyor: B, D ve E
+vakalarında onun için sonuç nominalin 0.98-1.00 katı — çünkü **hiçbiri bir
+tekerlek encoder'ına dokunmuyor.** Ayrım fazının "hasar" değil "sürüklenme"
+okuduğunu böyle anlıyoruz.
+
+### Nasıl okunur?
+
+**EKF her vakada dead reckoning'i yeniyor**, pozisyonda 1.60x - 2.77x.
+Füzyon yapmanın bütün gerekçesi bu, ölçülmüş hali.
+
+**Arıza türleri teorinin öngördüğü sırada.** Encoder bias'ı (3.6x) jiro
+gürültüsünden (1.4x) çok daha kötü, o da tam sensör kesintisinden (1.3x) kötü,
+o da LiDAR ışınlarının %60'ını kaybetmekten (ölçülebilir etki yok) kötü.
+
+> Bir arızayı tehlikeli yapan şey **ne kadar sinyal yok ettiği değil**, onu
+> **başka bir şeyin yalanlayıp yalanlayamadığıdır.**
+
+**Case C yığını yeniyor** — ve buradaki en faydalı sonuç bu. Filtre yönünü
+**±0.31 derece** güvenle raporluyor, ama **12 derece** yanlış. Scan matcher
+253 eşleşmenin 253'ünü 0.96 skorla kabul ediyor.
+
+Harita **EKF'in kendi tahmin ettiği pozda** kuruluyor. Tahmin sürüklendikçe
+harita da onunla sürükleniyor, ve sonra scan matching sürüklenmiş pozu
+**onaylıyor**. Döngüde hiçbir dış referans yok.
+
+**Filtre fazla kendine güveniyor**: vakaya göre kendi 2σ'sı hakkında zamanın
+%8 ila %53'ünde yanılıyor.
+
+### Case F neden "birikmedi"?
+
+Case F üç arızayı aynı anda koşuyor ve **1.43x** çıkıyor — tek arızalı Case
+C'nin **3.64x**'inden **daha hafif**. Üstelik **1.4 s'de toparlıyor**, Case C
+ise hiç toparlamıyor.
+
+Sebep birikme değil: sonucu **tek en güçlü bileşen** belirliyor, ve Case F'in
+encoder bias'ı daha zayıf (0.04 vs 0.05 rad/s).
+
+Bu, kendine-referanslı haritada bir **eşik** olduğunu düşündürüyor: belli bir
+birikmiş sürüklenmenin altında harita toparlanmaya yetecek kadar iyi kalıyor,
+üstünde ise harita hatanın etrafında yeniden çizilmiş oluyor.
+
+> **Sonuç değil, hipotez.** C ile F arasında iki değişken birden farklı ve her
+> ikisi de **tek koşu**. Phase 11'in yapması gereken deney tam olarak bu: tek
+> arıza, genliği taranmış, tohumlar üzerinden tekrarlanmış.
+
+Tam yazım: [`docs/fault-injection.md`](../fault-injection.md).
 
 ## Mini görev
 

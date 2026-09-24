@@ -1,0 +1,62 @@
+{
+  "scenario": "case_c_encoder_drift",
+  "description": "Right wheel encoder accumulates a +0.05 rad/s bias.",
+  "aborted": null,
+  "fault_windows": [
+    {
+      "type": "encoder_drift",
+      "onset_s": 15.0,
+      "end_s": 95.0,
+      "params": {
+        "wheel": "right",
+        "bias_rad_s": 0.05,
+        "ramp_time_s": 5.0
+      }
+    }
+  ],
+  "samples": 5116,
+  "estimators": {
+    "odometry": {
+      "duration_s": 125.18671035766602,
+      "distance_m": 20.059825755769914,
+      "position_rmse_m": 0.43505240136759193,
+      "position_max_m": 0.788548700555727,
+      "position_final_m": 0.7702777829557147,
+      "heading_rmse_deg": 35.43380893982569,
+      "heading_max_deg": 56.07483715234219,
+      "position_rmse_healthy_m": 0.006430722166970109,
+      "position_rmse_degraded_m": 0.36879928552066804,
+      "position_rmse_recovered_m": 0.6568886852867883,
+      "heading_rmse_healthy_deg": 0.47564452844085614,
+      "heading_rmse_degraded_deg": 29.65799960250898,
+      "heading_rmse_recovered_deg": 54.07725973832081,
+      "recovery_band_m": 0.05,
+      "recovery_time_s": NaN,
+      "recovery_outcome": "did not recover",
+      "fraction_inside_2sigma_pos": 0.6679046129788898,
+      "fraction_inside_2sigma_heading": 0.4091086786551994,
+      "reported_final_sigma_pos_m": 0.32932346036912513
+    },
+    "ekf": {
+      "duration_s": 125.18671035766602,
+      "distance_m": 20.059825755769914,
+      "position_rmse_m": 0.164566939089374,
+      "position_max_m": 0.44891281751186185,
+      "position_final_m": 0.40268755442861676,
+      "heading_rmse_deg": 12.535247420210812,
+      "heading_max_deg": 32.54575670457954,
+      "position_rmse_healthy_m": 0.01532681297345573,
+      "position_rmse_degraded_m": 0.11618907116923298,
+      "position_rmse_recovered_m": 0.27911376513404124,
+      "heading_rmse_healthy_deg": 1.6070852552024413,
+      "heading_rmse_degraded_deg": 9.184306937693217,
+      "heading_rmse_recovered_deg": 20.854993545317964,
+      "recovery_band_m": 0.05,
+      "recovery_time_s": NaN,
+      "recovery_outcome": "did not recover",
+      "fraction_inside_2sigma_pos": 0.4652071931196247,
+      "fraction_inside_2sigma_heading": 0.13389366692728694,
+      "reported_final_sigma_pos_m": 0.026546162514715404
+    }
+  }
+}

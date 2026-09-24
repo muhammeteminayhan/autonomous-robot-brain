@@ -5,7 +5,7 @@ Gazebo estimates its own pose from noisy IMU, wheel-encoder and 2D LiDAR data,
 maps its surroundings, plans a collision-free route to a goal, and keeps doing
 so while its sensors are deliberately degraded and failed.
 
-> **Project status: Phases 0-9 of 12 complete and verified.**
+> **Project status: Phases 0-10 of 12 complete and verified.**
 > A six-state EKF fuses wheel odometry, the IMU gyroscope and LiDAR scan
 > matching against a map the robot builds itself. Against ground truth over a
 > 10 m route it cuts position RMSE by **68 %** and heading RMSE by **61 %**
@@ -15,7 +15,10 @@ so while its sensors are deliberately degraded and failed.
 > in 36.5 s, collision-free, arriving 0.30 m from the goal.** Two controllers —
 > a DWA local planner and a pure-pursuit/PID follower — are measured against
 > each other on an identical course. 273 unit tests and 94 integration tests
-> pass. Fault injection (Phase 10) is next. See
+> pass. Six fault scenarios measure what the estimator does when its sensors
+> degrade: the EKF beats dead reckoning by 1.6-2.8x throughout, and a ramped
+> one-wheel encoder bias defeats it outright — the map is built at the estimate
+> it is supposed to correct. The benchmark sweep (Phase 11) is next. See
 > [Verification status](#verification-status) for exactly what has been run.
 
 ---
@@ -638,6 +641,49 @@ the corridor yet, replanning at 1 Hz as the map fills in.
 when it *believes* it has arrived within 0.20 m; whether it has is a question
 about the EKF.
 
+### Fault injection
+
+Six scenarios, one estimator, and the question of what a filter does when its
+sensors stop telling the truth. Faults are injected in the **preprocessing
+layer**, never in the simulator, so the wheels receive identical commands and
+the **true trajectory is the same in all six cases** — any difference is
+estimation error and nothing else. The route is open loop for the same reason:
+a controller steering on a corrupted estimate would send the robot somewhere
+physically different and confound the two.
+
+![Per-scenario error](results/phase10/fault_comparison.png)
+
+| Case | Scenario | Position RMSE [m] | vs A | Heading RMSE [deg] | vs A | Degraded-phase pos. RMSE [m] | Recovery [s] | Inside 2-sigma |
+|---|---|---|---|---|---|---|---|---|
+| A | Nominal | 0.0452 | 1.00x | 2.97 | 1.00x | -- | n/a | 76 % |
+| B | IMU noise x10 | 0.0621 | 1.37x | 4.30 | 1.45x | 0.0535 | 14.9 | 65 % |
+| C | Encoder drift | 0.1646 | 3.64x | 12.54 | 4.22x | 0.1162 | **never** | 47 % |
+| D | LiDAR dropout 60 % | 0.0352 | 0.78x | 2.60 | 0.88x | 0.0332 | not perturbed | 92 % |
+| E | Sensor outage 10 s | 0.0578 | 1.28x | 3.20 | 1.08x | 0.0647 | 0.9 | 56 % |
+| F | Multi-degradation | 0.0644 | 1.43x | 4.38 | 1.47x | 0.0544 | 1.4 | 70 % |
+
+Wheel odometry runs alongside as a **control**: cases B, D and E come out at
+0.98-1.00x of nominal for it, because none of them touches a wheel encoder.
+
+* **The EKF beats dead reckoning in every case**, by 1.60x to 2.77x on position.
+* **The failure modes rank as the theory predicts.** An encoder bias (3.6x) is
+  far worse than gyro noise (1.4x), worse than a total sensor outage (1.3x),
+  worse than losing 60 % of the LiDAR beams (no measurable effect). What makes a
+  fault dangerous is not how much signal it destroys but **whether anything else
+  can contradict it**.
+* **Case C defeats the stack, and that is the most useful result here.** The
+  filter reports ±0.31° of heading confidence while being wrong by 12°, and the
+  scan matcher accepts 253 of 253 matches at score 0.96. The map is built at the
+  EKF's own estimated pose, so as the estimate drifts the map drifts with it and
+  then *confirms* the drifted pose. This is what having no loop closure costs,
+  measured.
+* **The filter is overconfident**, wrong about its own 2-sigma between 8 % and
+  53 % of the time depending on the case.
+
+Every number is a **single run** — read a 2x change as real and anything smaller
+as noise. Full write-up, including why Case F did *not* compound:
+[docs/fault-injection.md](docs/fault-injection.md).
+
 ### Topic graph
 
 ```
@@ -769,7 +815,12 @@ to work until it has been executed.
 | One-command bringup | ✅ verified | `ros2 launch arb_bringup bringup.launch.py` brings up all 11 nodes and drives to a goal; RViz config loads clean |
 | A boxed-in robot commits to one escape direction | ✅ verified | `Dwa.CommitsToOneDirectionWhenItHasToTurnOnTheSpot` — caught a live stall of 0.3 m in 50 s |
 | End-to-end navigation to a goal | ✅ measured | 16.8 m in 36.5 s through a doorway, min clearance 0.40 m, final error 0.300 m |
-| Fault scenario timeline (Cases A-F) | ❌ not implemented | Phase 10 — the runtime knobs exist, the scheduler does not |
+| Fault scenario timeline (Cases A-F) | ✅ verified | `fault_scheduler` plays all six; ramp, bursts and outages confirmed live (102 parameter sets, 0 rejected, nominal restored) |
+| Fault timeline logic is not vacuous | ✅ verified | 57 unit tests; 13 injected mutations, all caught (one escaped first because Case D's burst onset is an exact multiple of its period) |
+| Scheduler's nominal table matches the parameter files | ✅ verified | checked both directions — a knob it does not know is a knob it cannot clear |
+| Fault state is isolated from every estimator | ✅ verified | same guard as ground truth, and it caught a hole that had made every C++ `#include` line invisible to the static check |
+| IMU gyro and accelerometer noise scale independently | ✅ verified | `GyroAndAccelerometerNoiseScaleIndependently` — `affect_accelerometer` was previously a comment, not a setting |
+| Fault scenarios measured (Cases A-F) | ✅ measured | [results/phase10/summary.md](results/phase10/summary.md) — EKF 1.60-2.77x better than odometry; Case C not survived |
 | Benchmark sweep (5 experiments) | ❌ not implemented | Phase 11 |
 
 

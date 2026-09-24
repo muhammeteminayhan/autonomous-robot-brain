@@ -148,6 +148,20 @@ sound and the table is built from them:
 Odometry is in the table as a **control**: it shows what the phase split looks
 like for an estimator the fault provably cannot touch.
 
+### Every number here is ONE run
+
+No scenario is repeated and nothing is averaged over seeds. Two runs of the
+*same* scenario differ by more than a little: the physics seed, where the robot
+happened to be when the map filled in, and which scan matches landed all move
+the result. Case A's covariance consistency came out at 76 % and Case D's at
+92 %, and that gap is run-to-run variation, not an effect of dropping 60 % of
+the LiDAR beams.
+
+So: read a **2x change as real** and anything smaller as noise. Phase 11's
+benchmark sweep is where repetition and averaging belong; this phase is about
+whether each failure mode does what the theory says, and the ones that matter
+here move the error by 4-10x.
+
 **Covariance consistency**: the fraction of samples whose error fell inside the
 filter's own reported 2-sigma. This is the difference between a filter that
 degrades and one that **lies**. A filter whose error grows while its covariance
@@ -158,7 +172,84 @@ it.
 
 ## 5. Results
 
-<!-- FILLED IN FROM results/phase10/summary.md -->
+Regenerate with `python3 scripts/fault_report.py`; the tables below are copied
+from `results/phase10/summary.md`.
+
+![Per-scenario error](../results/phase10/fault_comparison.png)
+
+### EKF
+
+| Case | Scenario | Position RMSE [m] | vs A | Heading RMSE [deg] | vs A | Degraded-phase pos. RMSE [m] | Recovery [s] | Inside 2-sigma |
+|---|---|---|---|---|---|---|---|---|
+| A | Nominal | 0.0452 | 1.00x | 2.97 | 1.00x | -- | n/a | 76 % |
+| B | IMU noise x10 | 0.0621 | 1.37x | 4.30 | 1.45x | 0.0535 | 14.9 | 65 % |
+| C | Encoder drift | 0.1646 | 3.64x | 12.54 | 4.22x | 0.1162 | **never** | 47 % |
+| D | LiDAR dropout 60 % | 0.0352 | 0.78x | 2.60 | 0.88x | 0.0332 | not perturbed | 92 % |
+| E | Sensor outage 10 s | 0.0578 | 1.28x | 3.20 | 1.08x | 0.0647 | 0.9 | 56 % |
+| F | Multi-degradation | 0.0644 | 1.43x | 4.38 | 1.47x | 0.0544 | 1.4 | 70 % |
+
+### Wheel odometry — the control
+
+| Case | Scenario | Position RMSE [m] | vs A | Heading RMSE [deg] | vs A | Degraded-phase pos. RMSE [m] | Recovery [s] | Inside 2-sigma |
+|---|---|---|---|---|---|---|---|---|
+| A | Nominal | 0.1000 | 1.00x | 7.76 | 1.00x | -- | n/a | 100 % |
+| B | IMU noise x10 | 0.0994 | 0.99x | 7.75 | 1.00x | 0.0838 | **never** | 100 % |
+| C | Encoder drift | 0.4351 | 4.35x | 35.43 | 4.56x | 0.3688 | **never** | 67 % |
+| D | LiDAR dropout 60 % | 0.0976 | 0.98x | 7.60 | 0.98x | 0.0842 | **never** | 100 % |
+| E | Sensor outage 10 s | 0.0977 | 0.98x | 7.60 | 0.98x | 0.0818 | **never** | 100 % |
+| F | Multi-degradation | 0.1747 | 1.75x | 13.10 | 1.69x | 0.1562 | **never** | 100 % |
+
+### Reading it
+
+**The EKF beats dead reckoning in every case**, by 1.5x to 2.8x on position.
+That is the whole argument for fusing at all, measured.
+
+**Faults the encoders cannot see do not move the odometry column.** Cases B, D
+and E come out at 0.98-1.00x of nominal for wheel odometry, because none of them
+touches a wheel encoder. That column is behaving exactly as a control should,
+and it is how you can tell the phase split is reading drift rather than damage.
+
+**The failure modes rank in the order the theory predicts.** An encoder bias
+(C, 3.6x) is far worse than gyro noise (B, 1.4x), which is worse than a total
+sensor outage (E, 1.3x), which is worse than losing most of the LiDAR beams
+(D, no measurable effect). What makes a fault dangerous is not how much signal
+it destroys but whether anything else can contradict it.
+
+**Odometry is always inside its own 2-sigma and the EKF often is not.** Wheel
+odometry reports a covariance that grows without bound, so it is trivially
+consistent — and useless, because a bound that wide constrains nothing. The EKF
+makes a much tighter claim and is wrong about it between 8 % and 53 % of the
+time. That is the honest reading: **this filter is overconfident**, most of all
+in Case C where it asserts +/-0.31 degrees while being wrong by 12.
+
+---
+
+## 5a. Case F did not compound, and the reason is a lead worth chasing
+
+Case F runs three faults at once and comes out at **1.43x** nominal — *milder
+than Case C's 3.64x*, which is one fault. It also **recovered in 1.4 s** where
+Case C never recovered at all.
+
+Compounding is not what happened. The outcome was dominated by the single
+strongest component, and **Case F's encoder bias is the weaker one**:
+
+| | Case C | Case F |
+|---|---|---|
+| wheel | right | left |
+| bias | 0.05 rad/s | 0.04 rad/s |
+| window | 15-95 s | 20-95 s |
+| heading RMSE after the fault cleared | 20.9 deg | 6.9 deg |
+| recovered | no | **yes, 1.4 s** |
+
+So a 20 % smaller bias over a 6 % shorter window is the difference between a
+map the scan matcher can pull the estimate back onto and one it cannot. That
+suggests a **threshold** in the self-referential map: below some accumulated
+drift the map stays good enough to recover from, and above it the map has been
+redrawn around the error.
+
+Stated as a hypothesis, not a result. Two variables differ between C and F and
+each is a **single run**, so this is not an attribution — it is the experiment
+Phase 11 should run: one fault, magnitude swept, repeated over seeds.
 
 ---
 
@@ -209,7 +300,37 @@ robot did not draw itself.
 
 ---
 
-## 7. A knob that could not do what the config claimed
+## 7. Case E is the one the filter passes cleanly
+
+Case E asks the question an EKF exists to answer: with **no measurement at
+all**, does it keep predicting and re-converge, or freeze?
+
+It keeps predicting, and re-converges in **0.91 s**.
+
+![Case E](../results/phase10/case_e_sensor_outage_errors.png)
+
+The two bands are the outages. The asymmetry between them is the interesting
+part:
+
+* **IMU outage, 30-40 s** — barely visible. Wheel odometry and scan matching
+  are both still there, and the gyro's contribution is heading rate, which the
+  encoders also measure.
+* **LiDAR outage, 70-80 s** — the error climbs to 0.09 m and the reported
+  2-sigma (bottom panel, dashed) **grows smoothly throughout the outage**, from
+  0.03 m to 0.05 m. That growth is the filter correctly saying "I have no
+  absolute reference and I am getting less sure". When the scan returns the
+  error snaps back down.
+
+The LiDAR matters more because it is the **only absolute** measurement. Everything
+else is a rate, and rates only ever tell you how much things have changed.
+
+Covariance consistency is the blemish: 56 % of samples inside 2-sigma, the worst
+of any case. The filter survives the outage and is honest *during* it, and is
+still too confident overall.
+
+---
+
+## 8. A knob that could not do what the config claimed
 
 `configs/scenarios/*.yaml` declares `affect_accelerometer` per IMU fault: Case B
 degrades the whole package, Case F only the gyro. The preprocessor had a single
@@ -228,7 +349,7 @@ A config value that is silently ignored is worse than no config value.
 
 ---
 
-## 8. What is not tested here
+## 9. What is not tested here
 
 * **No fault detection.** Nothing in the stack decides a sensor has failed and
   acts on it. The NIS gate rejects individual bad measurements, which is not the
