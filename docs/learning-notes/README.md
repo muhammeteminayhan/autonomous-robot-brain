@@ -21,3 +21,4 @@ Her faz için bir dosya:
 | `phase-09-kontrol.md` | 9 | PID, anti-windup, sarılmış açı türevi, rate limiter |
 | `phase-10-ariza-enjeksiyonu.md` | 10 | Fault injection, senaryo zamanlayıcı, recovery time |
 | `phase-11-benchmark.md` | 11 | Deney tasarımı, tarama, tohum tekrarı, dinamik engel |
+| `phase-12-dokumantasyon.md` | 12 | Dokümantasyon tutarlılığı, doğrulama, ekran görüntüsü |

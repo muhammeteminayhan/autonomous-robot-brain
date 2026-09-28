@@ -5,7 +5,7 @@ Gazebo estimates its own pose from noisy IMU, wheel-encoder and 2D LiDAR data,
 maps its surroundings, plans a collision-free route to a goal, and keeps doing
 so while its sensors are deliberately degraded and failed.
 
-> **Project status: Phases 0-10 of 12 complete and verified.**
+> **Project status: all 12 phases complete and verified.**
 > A six-state EKF fuses wheel odometry, the IMU gyroscope and LiDAR scan
 > matching against a map the robot builds itself. Against ground truth over a
 > 10 m route it cuts position RMSE by **68 %** and heading RMSE by **61 %**
@@ -14,12 +14,25 @@ so while its sensors are deliberately degraded and failed.
 > the plan: **16.8 m from the west corridor through a 1.5 m doorway into Room E
 > in 36.5 s, collision-free, arriving 0.30 m from the goal.** Two controllers —
 > a DWA local planner and a pure-pursuit/PID follower — are measured against
-> each other on an identical course. 332 unit tests and 126 integration tests
+> each other on an identical course. 332 unit tests and 127 integration tests
 > pass. Six fault scenarios measure what the estimator does when its sensors
 > degrade: the EKF beats dead reckoning by 1.6-2.8x throughout, and a ramped
 > one-wheel encoder bias defeats it outright — the map is built at the estimate
-> it is supposed to correct. The benchmark sweep (Phase 11) is next. See
+> it is supposed to correct. Five experiments, 78 runs repeated over seeds,
+> then locate the boundaries: the encoder-bias recovery threshold sits
+> between **0.04 and 0.05 rad/s**, a **40x** change in gyro noise costs only
+> **1.7x** in error, **11 of 360** LiDAR beams are enough to localise — and the
+> local planner **collides with a crossing obstacle in 3 of 3 runs**, because
+> DWA has no model of obstacle velocity. See
 > [Verification status](#verification-status) for exactly what has been run.
+
+![The robot's own map, the A* plan and the EKF pose, in RViz](docs/images/rviz_navigation.png)
+
+*What the robot believes: the occupancy grid it built itself (pale = free,
+dark = occupied, olive = never observed), the live LiDAR return in red, the A*
+plan in cyan, and the EKF pose with its covariance ellipse. Nothing here was
+given to it — the map is the robot's own work, and the plan is routed through
+it.*
 
 ---
 
@@ -404,6 +417,13 @@ One section per phase, each ending in a number that came from running it. The
 derivations are in [`docs/`](docs/); this is the tour.
 
 ### Simulation
+
+![The generated Gazebo world](docs/images/gazebo_world.png)
+
+*And the world it is actually in. Every wall segment is a separately named
+entity — `wall_outer_south`, `wall_corr_n_1` — because the SDF is **generated**
+from `configs/world.yaml` by `scripts/generate_world.py`, not hand-written. One
+floor plan feeds the simulator, the evaluation plots and the map scoring.*
 
 ![LiDAR scan overlaid on the generated floor plan](results/phase1/scan_vs_world.png)
 
@@ -827,7 +847,7 @@ to work until it has been executed.
 | Environment (ROS 2 Jazzy, Gazebo Sim 8.15.0, g++ 13.3, CMake 3.28, Eigen 3.4) | ✅ verified | `./scripts/check_environment.sh` → *Environment OK* |
 | `colcon build` | ✅ verified | 11/11 packages, zero stderr |
 | Unit tests (`colcon test`) | ✅ verified | **332 tests, 0 failures** |
-| Integration tests (`pytest tests/integration`) | ✅ verified | **126 passed, 1 skipped** |
+| Integration tests (`pytest tests/integration`) | ✅ verified | **127 passed, 1 skipped** |
 | Unit tests are not vacuous | ✅ verified | **60 code mutations** injected across six packages; all caught (11 escaped first and the tests were strengthened; 1 was an equivalent mutant and was removed) |
 | Guard tests actually bite | ✅ verified | 8 probes against the isolation, config-consistency and docs-consistency guards; every one fails the guard it targets and passes once reverted |
 | Planner benchmark | ✅ measured | [results/phase7/planner_benchmark.csv](results/phase7/planner_benchmark.csv) |
@@ -897,9 +917,28 @@ to work until it has been executed.
 
 ## Future improvements
 
-- Replace the EKF with an Unscented or Invariant EKF and compare consistency (NEES).
-- Graph-based SLAM with loop closure instead of a static grid.
+Ordered by how much each would change a number this project has already
+measured, rather than by how interesting it sounds.
+
+- **Graph-based SLAM with loop closure** instead of a static grid. Phase 10
+  measured exactly what its absence costs: under a ramped encoder bias the map
+  drifts with the estimate and then confirms it, and the filter ends up
+  asserting ±0.31° while being wrong by 12°. Nothing else on this list moves a
+  number that far.
+- **Velocity obstacles, or a costmap layer inflated along predicted obstacle
+  motion.** Phase 11's crossing obstacle produced a collision in 3 of 3 runs
+  because DWA plans against a still photograph. Both fixes need obstacle
+  velocity, which this stack never estimates — the scan is a set of points with
+  no correspondence between frames.
+- **Recovery behaviours.** A robot that gets genuinely stuck stays stuck.
+- Replace the EKF with an Unscented or Invariant EKF and compare consistency
+  (NEES). The current filter is measurably overconfident — wrong about its own
+  2σ between 8 % and 53 % of the time depending on the fault.
 - MPC in place of PID for trajectory tracking.
+- A composed-container launch (`rclcpp_components`) for intra-process
+  zero-copy. Planned for Phase 12 and deliberately not built: at 10 Hz LiDAR
+  and 200 Hz IMU nothing here is bandwidth-bound, so it would be optimisation
+  without a measurement to justify it.
 - Hardware validation on a physical differential-drive platform.
 
 ---

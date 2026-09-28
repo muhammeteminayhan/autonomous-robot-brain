@@ -190,10 +190,16 @@ explain in an interview.
 ## 8. Execution model
 
 Each subsystem is a separate process during development so that a crash is
-localised and `ros2 topic hz` gives honest per-node timing. Phase 12 adds an
-optional composed-container launch (`rclcpp_components`) that loads the
-estimation nodes into one process for intra-process zero-copy, which matters
-once the LiDAR rate is raised.
+localised and `ros2 topic hz` gives honest per-node timing.
+
+A composed-container launch (`rclcpp_components`), loading the estimation nodes
+into one process for intra-process zero-copy, was planned for Phase 12 and was
+**not built** — Phase 12 became documentation and verification instead. It is
+listed under Future improvements in the README rather than left as a promise
+here, because the case for it is unproven: at 10 Hz for the LiDAR and 200 Hz
+for the IMU nothing in this stack is bandwidth-bound, and the measured
+estimation latency is 55 ms median, of which serialisation is not the
+dominant term.
 
 The EKF runs on a fixed-rate timer rather than being driven by measurement
 arrival, so prediction cadence stays constant even during a sensor outage

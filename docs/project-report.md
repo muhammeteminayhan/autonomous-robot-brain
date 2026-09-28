@@ -152,7 +152,7 @@ the rotation that produced it**.
 | | Count |
 |---|---|
 | Unit tests (`colcon test`) | 332 |
-| Integration tests (`pytest tests/integration`) | 126 |
+| Integration tests (`pytest tests/integration`) | 127 |
 | Code mutations injected, across six packages | 60 |
 | …that escaped first and forced a stronger test | 11 |
 | …that turned out to be an equivalent mutant, and were removed | 1 |
@@ -324,7 +324,7 @@ Ordered by how much it would improve *this* project:
 > global planning and DWA local avoidance. Reduced position error by **68 %**
 > versus dead reckoning (0.0155 m RMSE over 10 m) and validated under six
 > injected fault scenarios plus parameter sweeps repeated over seeds. 332 unit
-> and 126 integration tests, hardened against 60 deliberately
+> and 127 integration tests, hardened against 60 deliberately
 > injected mutations.
 
 ### In the interview
