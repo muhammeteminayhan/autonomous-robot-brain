@@ -59,3 +59,13 @@ venv/
 # across ~90 runs, they overwrite each other between seeds of the same level,
 # and every one of them is regenerable from the JSON beside it.
 results/phase11/raw/*.png
+
+# ---- Secrets ----
+# .env holds a GitHub token. It was untracked but NOT ignored, which is one
+# `git add -A` away from publishing the credential -- and this project uses
+# `git add -A` routinely.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
