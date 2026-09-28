@@ -60,14 +60,14 @@ apart, median of five runs each. The 480 x 360 grid at 5 cm resolution is
 |---|---|---|---|---|---|---|---|
 | Dijkstra | none | 1.0 | 13.211 | 6.764 | 45 836 | 46 977 | 0.00 % |
 | A* | euclidean | 1.0 | 13.211 | 2.691 | 13 171 | 20 312 | 0.00 % |
-| **A*** | **octile** | **1.0** | **13.211** | **2.812** | **10 947** | **22 365** | **0.00 %** |
+| **A\*** | **octile** | **1.0** | **13.211** | **2.812** | **10 947** | **22 365** | **0.00 %** |
 | A* | manhattan | 1.0 | 13.174 | 1.658 | 6 573 | 14 463 | **+1.30 %** |
 | A* | octile | 2.0 | 13.322 | 0.959 | 3 896 | 8 996 | **+13.99 %** |
 | A* | octile | 5.0 | 13.544 | 0.669 | 2 847 | 6 643 | **+47.00 %** |
 
 Reading it:
 
-* **A* expands 4.2x fewer nodes than Dijkstra** for an identical path. That is
+* **A\* expands 4.2x fewer nodes than Dijkstra** for an identical path. That is
   the entire value of a heuristic.
 * **Octile expands 17 % fewer nodes than Euclidean**, as the tightness
   predicts — but it *generates* more and its wall-clock time is a wash.

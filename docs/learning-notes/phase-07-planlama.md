@@ -63,14 +63,14 @@ Robotun kendi kurduğu haritadan üretilen 12 sorgu, en az 3 m ayrık, her biri
 |---|---|---|---|---|---|---|
 | Dijkstra | yok | 1.0 | 13.211 | 6.764 | 45.836 | %0.00 |
 | A* | euclidean | 1.0 | 13.211 | 2.691 | 13.171 | %0.00 |
-| **A*** | **octile** | **1.0** | **13.211** | **2.812** | **10.947** | **%0.00** |
+| **A\*** | **octile** | **1.0** | **13.211** | **2.812** | **10.947** | **%0.00** |
 | A* | manhattan | 1.0 | 13.174 | 1.658 | 6.573 | **+%1.30** |
 | A* | octile | 2.0 | 13.322 | 0.959 | 3.896 | **+%13.99** |
 | A* | octile | 5.0 | 13.544 | 0.669 | 2.847 | **+%47.00** |
 
 ### Nasıl okunur?
 
-- **A*, Dijkstra'dan 4.2× az düğüm genişletiyor**, aynı yolu buluyor. Bir
+- **A\*, Dijkstra'dan 4.2× az düğüm genişletiyor**, aynı yolu buluyor. Bir
   heuristic'in tüm değeri bu.
 - **Octile, Euclidean'dan %17 az genişletiyor** (sıkılığın öngördüğü gibi) —
   ama **daha fazla üretiyor** ve duvar-saati süresi başa baş. Genişletme
@@ -78,7 +78,7 @@ Robotun kendi kurduğu haritadan üretilen 12 sorgu, en az 3 m ayrık, her biri
   heuristic kuyruğu daha çok yeniden sıraladığı için ikisi her zaman aynı yöne
   gitmez.
 - **Manhattan en hızlı "admissible görünen" seçenek ve admissible değil.**
-- **Ağırlıklı A* dürüst bir takas**: ağırlık 5'te Dijkstra'dan 10× hızlı,
+- **Ağırlıklı A\* dürüst bir takas**: ağırlık 5'te Dijkstra'dan 10× hızlı,
   optimalden %47 uzak.
 
 ## 4. Costmap — inflation neden?
