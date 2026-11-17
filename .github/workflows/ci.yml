@@ -1,0 +1,80 @@
+# Build the workspace, run every test, and check the documentation agrees with
+# itself. No simulator: GitHub runners have no GPU and Gazebo would make this a
+# twenty-minute job that fails for reasons unrelated to the change. The
+# physics-in-the-loop numbers live in results/ and are reproduced by hand -- CI
+# proves the code builds and the tests pass, which is what CI is good at.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: build + test (ROS 2 Jazzy)
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base-noble
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          # The same list the Dockerfile installs; see docker/apt-packages.txt
+          # for why it is not written out twice.
+          apt-get update
+          sed -e 's/#.*//' -e '/^[[:space:]]*$/d' docker/apt-packages.txt \
+            | xargs apt-get install -y --no-install-recommends
+
+      - name: Guard against a non-ASCII workspace path
+        shell: bash
+        run: |
+          # rosidl silently truncates a path at its first non-ASCII byte and
+          # fails with "Target dependency '/home/user/Masa' does not exist".
+          # It cost an afternoon once; it is one line to rule out forever.
+          if printf '%s' "$PWD" | LC_ALL=C grep -q '[^ -~]'; then
+            echo "::error::workspace path contains non-ASCII characters: $PWD"
+            exit 1
+          fi
+
+      - name: Build
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          cd ros2_ws
+          colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+
+      - name: Unit tests
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          cd ros2_ws
+          source install/setup.bash
+          colcon test --event-handlers console_direct+
+          colcon test-result --verbose
+
+      - name: Integration tests
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          source ros2_ws/install/setup.bash
+          # The runtime graph checks skip cleanly when no stack is running,
+          # which on a CI runner is always.
+          python3 -m pytest tests/integration -v
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: ros2_ws/build/*/test_results/**/*.xml
+          if-no-files-found: ignore

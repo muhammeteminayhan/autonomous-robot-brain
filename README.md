@@ -1,5 +1,9 @@
 # Autonomous Robot Brain
 
+[![CI](https://github.com/muhammeteminayhan/autonomous-robot-brain/actions/workflows/ci.yml/badge.svg)](https://github.com/muhammeteminayhan/autonomous-robot-brain/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![ROS 2 Jazzy](https://img.shields.io/badge/ROS%202-Jazzy-22314E?logo=ros)](https://docs.ros.org/en/jazzy/)
+
 A miniature autonomous-vehicle software stack: a differential-drive robot in
 Gazebo estimates its own pose from noisy IMU, wheel-encoder and 2D LiDAR data,
 maps its surroundings, plans a collision-free route to a goal, and keeps doing
@@ -14,7 +18,7 @@ so while its sensors are deliberately degraded and failed.
 > the plan: **16.8 m from the west corridor through a 1.5 m doorway into Room E
 > in 36.5 s, collision-free, arriving 0.30 m from the goal.** Two controllers —
 > a DWA local planner and a pure-pursuit/PID follower — are measured against
-> each other on an identical course. 332 unit tests and 127 integration tests
+> each other on an identical course. 332 unit tests and 133 integration tests
 > pass. Six fault scenarios measure what the estimator does when its sensors
 > degrade: the EKF beats dead reckoning by 1.6-2.8x throughout, and a ramped
 > one-wheel encoder bias defeats it outright — the map is built at the estimate
@@ -847,7 +851,7 @@ to work until it has been executed.
 | Environment (ROS 2 Jazzy, Gazebo Sim 8.15.0, g++ 13.3, CMake 3.28, Eigen 3.4) | ✅ verified | `./scripts/check_environment.sh` → *Environment OK* |
 | `colcon build` | ✅ verified | 11/11 packages, zero stderr |
 | Unit tests (`colcon test`) | ✅ verified | **332 tests, 0 failures** |
-| Integration tests (`pytest tests/integration`) | ✅ verified | **127 passed, 1 skipped** |
+| Integration tests (`pytest tests/integration`) | ✅ verified | **133 passed, 1 skipped** |
 | Unit tests are not vacuous | ✅ verified | **60 code mutations** injected across six packages; all caught (11 escaped first and the tests were strengthened; 1 was an equivalent mutant and was removed) |
 | Guard tests actually bite | ✅ verified | 8 probes against the isolation, config-consistency and docs-consistency guards; every one fails the guard it targets and passes once reverted |
 | Planner benchmark | ✅ measured | [results/phase7/planner_benchmark.csv](results/phase7/planner_benchmark.csv) |

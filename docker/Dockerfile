@@ -16,32 +16,14 @@ ARG DEBIAN_FRONTEND=noninteractive
 SHELL ["/bin/bash", "-c"]
 
 # --- Toolchain and library dependencies -------------------------------------
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential \
-      cmake \
-      git \
-      libeigen3-dev \
-      python3-colcon-common-extensions \
-      python3-pip \
-      python3-numpy \
-      python3-scipy \
-      python3-matplotlib \
-      python3-pandas \
-      python3-pytest \
-      python3-pytest-cov \
-      ros-jazzy-ros-gz \
-      ros-jazzy-gz-transport-vendor \
-      ros-jazzy-gz-msgs-vendor \
-      ros-jazzy-tf2-ros \
-      ros-jazzy-tf2-geometry-msgs \
-      ros-jazzy-robot-state-publisher \
-      ros-jazzy-joint-state-publisher \
-      ros-jazzy-xacro \
-      ros-jazzy-rviz2 \
-      ros-jazzy-nav-msgs \
-      ros-jazzy-visualization-msgs \
-      ros-dev-tools \
-    && rm -rf /var/lib/apt/lists/*
+# The list lives in docker/apt-packages.txt so that this image and the GitHub
+# Actions workflow cannot drift apart. Copied in before the install so the
+# layer cache invalidates exactly when the dependency set changes.
+COPY docker/apt-packages.txt /tmp/apt-packages.txt
+RUN apt-get update \
+    && sed -e 's/#.*//' -e '/^[[:space:]]*$/d' /tmp/apt-packages.txt \
+       | xargs apt-get install -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* /tmp/apt-packages.txt
 
 # --- Non-root user so files written into the mounted workspace stay editable -
 ARG USERNAME=arb
