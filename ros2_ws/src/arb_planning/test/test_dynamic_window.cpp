@@ -650,6 +650,267 @@ TEST(Dwa, ReleasesTheCommittedDirectionOnceItCanDriveAgain)
   EXPECT_LT(again.omega, 0.0) << "goal is to the right, so turn right";
 }
 
+// =============================================================================
+// Predicting obstacle motion. Phase 11 measured DWA driving into a crossing
+// obstacle 3 times out of 3 because its rollout swept through the obstacle
+// positions as they were WHEN THE ROLLOUT WAS COMPUTED.
+// =============================================================================
+
+TEST(Dwa, AStaticObstacleIsUnaffectedByPrediction)
+{
+  // The safety property of the whole change: an obstacle with zero velocity
+  // must give byte-identical answers whether prediction is on or off, so
+  // turning it on cannot regress any of the static-world behaviour the
+  // earlier phases measured.
+  DwaConfig a = config(); a.predict_obstacle_motion = false;
+  DwaConfig b = config(); b.predict_obstacle_motion = true;
+  DynamicWindowPlanner off(a), on(b);
+
+  const std::vector<ObstaclePoint> wall = {
+    {1.2, 0.0, 0.0, 0.0}, {1.2, 0.2, 0.0, 0.0}, {1.2, -0.2, 0.0, 0.0}};
+  const auto path = denseLine({Pose2D(0,0,0), Pose2D(4,0,0)}, 0.05);
+  for (double v : {0.0, 0.2, 0.5, 0.7}) {
+    const auto ra = off.plan(v, 0.0, path.back(), path, wall, 0.05);
+    const auto rb = on.plan(v, 0.0, path.back(), path, wall, 0.05);
+    EXPECT_DOUBLE_EQ(ra.v, rb.v) << "diverged at v = " << v;
+    EXPECT_DOUBLE_EQ(ra.omega, rb.omega) << "diverged at v = " << v;
+  }
+}
+
+TEST(Dwa, SeesAnObstacleThatWillCrossIntoItsPath)
+{
+  // Geometry chosen so the two answers must differ, rather than hoping they
+  // do. The robot drives +x at 0.6 m/s; the obstacle sits at (0.6, -0.6) and
+  // crosses at 0.6 m/s. At t = 1 s both are at (0.6, 0.0) exactly. Held
+  // still, the obstacle is 0.6 m off the path and irrelevant.
+  DwaConfig cfg = config();
+  const std::vector<ObstaclePoint> crossing = {{0.6, -0.6, 0.0, 0.6}};
+
+  cfg.predict_obstacle_motion = false;
+  const double d_blind = DynamicWindowPlanner(cfg)
+    .distanceToCollision(0.6, 0.0, crossing);
+  cfg.predict_obstacle_motion = true;
+  const double d_aware = DynamicWindowPlanner(cfg)
+    .distanceToCollision(0.6, 0.0, crossing);
+
+  EXPECT_TRUE(std::isinf(d_blind))
+    << "held still the obstacle is 0.6 m off the path; got " << d_blind;
+  EXPECT_TRUE(std::isfinite(d_aware))
+    << "predicted forward they meet at (0.6, 0), but the check says clear";
+  // Contact happens BEFORE the centres meet: the robot has a 0.25 m radius,
+  // so the rollout stops when the separation reaches 0.25, which the geometry
+  // puts at 0.42 m of travel rather than the 0.60 m where they coincide.
+  EXPECT_NEAR(d_aware, 0.42, 0.10)
+    << "saw it, but not where the arithmetic says: " << d_aware;
+}
+
+namespace
+{
+/// Closed-loop run: DWA drives down a straight path while one obstacle
+/// crosses it. Returns how close the two ever came.
+///
+/// A single plan() call cannot show avoidance. The dynamic window is what the
+/// robot can reach in ONE control period: at 20 Hz with a 1.0 m/s^2 limit that
+/// is 0.1 m/s of velocity range and +/-0.15 rad/s of turn. Every candidate
+/// goes to almost the same place, the clearance scores barely differ, and
+/// after normalisation the ranking is unchanged. Avoidance is emergent over
+/// many cycles, so the test has to run many cycles.
+double closestApproach(bool predict, double obstacle_x, double obstacle_y0,
+                       double obstacle_speed)
+{
+  DwaConfig cfg = config();
+  cfg.predict_obstacle_motion = predict;
+  DynamicWindowPlanner planner(cfg);
+  const auto path = denseLine({Pose2D(0, 0, 0), Pose2D(9, 0, 0)}, 0.05);
+
+  double rx = 0.0, ry = 0.0, rth = 0.0, v = 0.5, w = 0.0;
+  double ox = obstacle_x, oy = obstacle_y0;
+  double worst = 1e9;
+  const double dt = 0.05;
+  for (int i = 0; i < 240; ++i) {                 // 12 s at 20 Hz
+    worst = std::min(worst, std::hypot(ox - rx, oy - ry));
+
+    const double c = std::cos(-rth), s = std::sin(-rth);
+    const double dx = ox - rx, dy = oy - ry;
+    std::vector<ObstaclePoint> seen = {{
+      c * dx - s * dy, s * dx + c * dy,
+      -s * obstacle_speed, c * obstacle_speed}};
+    std::vector<Pose2D> local;
+    local.reserve(path.size());
+    for (const auto & q : path) {
+      const double px = q.x - rx, py = q.y - ry;
+      local.emplace_back(c * px - s * py, s * px + c * py, 0.0);
+    }
+
+    const auto r = planner.plan(v, w, local.back(), local, seen, dt);
+    if (r.success) {v = r.v; w = r.omega;} else {v = 0.0; w = 0.0;}
+
+    const double half = 0.5 * w * dt;
+    const double k = (std::abs(half) < 1e-9) ? 1.0 : std::sin(half) / half;
+    rx += v * dt * k * std::cos(rth + half);
+    ry += v * dt * k * std::sin(rth + half);
+    rth = arb_core::normalizeAngle(rth + w * dt);
+    oy += obstacle_speed * dt;
+  }
+  return worst;
+}
+}  // namespace
+
+TEST(Dwa, AvoidsACrossingObstacleOverManyCycles)
+{
+  // Swept over crossing TIMINGS rather than hand-tuned to one.
+  //
+  // A single geometry would have to be tuned until it collided, and a test
+  // tuned until it fails the way you wanted is a test that proves whatever you
+  // aimed it at. Sweeping the obstacle's head start covers early, exact and
+  // late crossings, and makes the claim the interesting one: prediction must
+  // never do WORSE, and must fix the cases that actually collide.
+  const double speed = 0.55;
+  const double radius = config().robot_radius;
+
+  int collided_blind = 0, collided_aware = 0, newly_broken = 0;
+  double best_gain = 0.0, worst_loss = 0.0;
+  for (double y0 = -3.6; y0 <= -1.4 + 1e-9; y0 += 0.2) {
+    const double blind = closestApproach(false, 2.5, y0, speed);
+    const double aware = closestApproach(true, 2.5, y0, speed);
+    if (blind <= radius) {++collided_blind;}
+    if (aware <= radius) {++collided_aware;}
+
+    // The claim that matters: never turn a clear pass into a collision.
+    if (blind > radius && aware <= radius) {
+      ++newly_broken;
+      ADD_FAILURE() << "y0 = " << y0 << ": prediction CAUSED a collision -- "
+                    << aware << " m, was " << blind << " m";
+    }
+    best_gain = std::max(best_gain, aware - blind);
+    worst_loss = std::max(worst_loss, blind - aware);
+  }
+
+  ASSERT_GT(collided_blind, 0)
+    << "no timing in the sweep collided without prediction, so the test "
+       "cannot show that prediction fixes anything";
+  EXPECT_LT(collided_aware, collided_blind)
+    << "prediction fixed none of the " << collided_blind << " collisions";
+  EXPECT_EQ(newly_broken, 0);
+  EXPECT_GT(best_gain, 0.05)
+    << "prediction never gained more than " << best_gain << " m anywhere";
+
+  // Small losses are expected and are not regressions: predicting makes the
+  // robot take a genuinely different route, so a few centimetres either way at
+  // a timing that was never close is route difference, not damage. A fifth of
+  // the footprint is the line between the two.
+  EXPECT_LT(worst_loss, 0.05)
+    << "lost " << worst_loss << " m of clearance at some timing, which is too "
+       "much to call route difference";
+}
+
+TEST(Dwa, ClearanceScoresAgainstWhereTheObstacleWillBe)
+{
+  // The clearance SCORE is time-aware as well as the hard rejection, and a
+  // mutation test showed nothing noticed when it was not -- the rejection was
+  // doing all the work. That is worth knowing and worth keeping honest: the
+  // score still decides WHICH of the surviving commands is preferred, and
+  // preferring the one that passes further from where the obstacle is GOING
+  // is the point.
+  DwaConfig cfg = config();
+  cfg.predict_obstacle_motion = true;
+  DynamicWindowPlanner planner(cfg);
+
+  // A rollout straight down +x, and an obstacle beside it that will have
+  // moved into the lane by the time the robot is level with it.
+  const auto poses = planner.rollout(0.5, 0.0);
+  const std::vector<ObstaclePoint> parked   = {{0.8, -0.7, 0.0, 0.0}};
+  const std::vector<ObstaclePoint> crossing = {{0.8, -0.7, 0.0, 0.5}};
+
+  const double c_parked = planner.clearance(poses, parked);
+  const double c_crossing = planner.clearance(poses, crossing);
+  EXPECT_LT(c_crossing, c_parked)
+    << "a crossing obstacle scored " << c_crossing << " m of clearance, the "
+    << "same obstacle parked scored " << c_parked
+    << " -- the score is blind to where it is going";
+
+  // And the control: identical geometry with prediction off must give the
+  // parked answer, so the flag really is what switches the behaviour.
+  cfg.predict_obstacle_motion = false;
+  EXPECT_DOUBLE_EQ(DynamicWindowPlanner(cfg).clearance(poses, crossing),
+                   c_parked);
+}
+
+TEST(Dwa, WhenNothingClearsItTakesTheCommandThatBuysTheMostTime)
+{
+  // The evasion fallback. Stopping is not a safe default against something
+  // coming towards you -- that is precisely how the Phase 11 collision
+  // happened -- so when every command is disqualified the planner takes the
+  // one with the latest predicted contact.
+  //
+  // HOW MUCH THAT IS WORTH, measured rather than assumed: scanning the whole
+  // dynamic window over several threat geometries, the spread between the
+  // best and worst available contact time is at most 0.1 s, which is exactly
+  // one `simulation_dt`. The ordering is real but bounded by the predictor's
+  // own time resolution, and a symmetric head-on threat has no spread at all
+  // -- no command is better than any other, and the first version of this
+  // test used exactly that scenario and could prove nothing.
+  //
+  // So: a geometry where the choice DOES differ, and an exact assertion.
+  DwaConfig cfg = config();
+  cfg.predict_obstacle_motion = true;
+  DynamicWindowPlanner planner(cfg);
+
+  const std::vector<ObstaclePoint> incoming = {{1.2, 0.0, -0.8, 0.0}};
+  const auto path = denseLine({Pose2D(0, 0, 0), Pose2D(6, 0, 0)}, 0.05);
+  const double v0 = 0.4, dt = 0.05;
+  const auto r = planner.plan(v0, 0.0, path.back(), path, incoming, dt);
+
+  ASSERT_TRUE(r.success);
+  EXPECT_TRUE(r.evading) << "did not report that it was evading";
+  EXPECT_EQ(r.candidates_admissible, 0)
+    << "the scenario was supposed to disqualify everything";
+  EXPECT_LT(r.v, v0) << "chose " << r.v << " m/s into an oncoming obstacle";
+
+  // The best contact time anywhere in the window the planner could reach.
+  const double v_lo = std::max(cfg.min_linear_velocity,
+                               v0 - cfg.max_linear_acceleration * dt);
+  const double v_hi = std::min(cfg.max_linear_velocity,
+                               v0 + cfg.max_linear_acceleration * dt);
+  const double w_lim = std::min(cfg.max_angular_velocity,
+                                cfg.max_angular_acceleration * dt);
+  double best = 0.0, worst = 1e9;
+  for (double v = v_lo; v <= v_hi + 1e-9; v += 0.01) {
+    for (double w = -w_lim; w <= w_lim + 1e-9; w += 0.01) {
+      const double tc = planner.timeToCollision(v, w, incoming);
+      if (!std::isfinite(tc)) {continue;}
+      best = std::max(best, tc);
+      worst = std::min(worst, tc);
+    }
+  }
+  ASSERT_GT(best - worst, 1e-9)
+    << "this geometry gives every command the same contact time, so the test "
+       "cannot tell a good choice from a bad one";
+  EXPECT_GE(r.best.time_to_moving_collision, best - 1e-9)
+    << "chose " << r.best.time_to_moving_collision << " s out of a window "
+    << "spanning " << worst << " to " << best;
+}
+
+TEST(Dwa, StandingStillIsNotSafeWhenTheObstacleIsWhatMoves)
+{
+  // Exactly how the Phase 11 collision happened: DWA commanded a stop, and
+  // the obstacle walked into the stationary robot. A zero-velocity command
+  // must not be scored as clear just because nothing is touching the robot
+  // at this instant.
+  DwaConfig cfg = config();
+  cfg.predict_obstacle_motion = true;
+  DynamicWindowPlanner planner(cfg);
+  // 0.9 m away, closing at 0.8 m/s: it arrives in just over a second, well
+  // inside the 2 s horizon.
+  const std::vector<ObstaclePoint> incoming = {{0.9, 0.0, -0.8, 0.0}};
+  EXPECT_EQ(planner.distanceToCollision(0.0, 0.0, incoming), 0.0)
+    << "standing still was scored as safe while something walked into it";
+
+  // And the control: something moving AWAY leaves standing still safe.
+  const std::vector<ObstaclePoint> leaving = {{0.9, 0.0, +0.8, 0.0}};
+  EXPECT_TRUE(std::isinf(planner.distanceToCollision(0.0, 0.0, leaving)));
+}
+
 int main(int argc, char ** argv)
 {
   ::testing::InitGoogleTest(&argc, argv);

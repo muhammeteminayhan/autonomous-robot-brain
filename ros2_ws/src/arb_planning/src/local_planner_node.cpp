@@ -24,6 +24,7 @@
 #include "arb_core/angles.hpp"
 #include "arb_core/pose2d.hpp"
 #include "arb_planning/dynamic_window.hpp"
+#include "arb_planning/obstacle_tracker.hpp"
 
 namespace arb_planning
 {
@@ -56,6 +57,28 @@ public:
     cfg.collision_margin = declare_parameter("collision_margin", 0.02);
     cfg.enforce_stopping_distance =
       declare_parameter("enforce_stopping_distance", true);
+    cfg.predict_obstacle_motion =
+      declare_parameter("predict_obstacle_motion", true);
+
+    // The tracker turns a scan -- a set of points with no correspondence
+    // between frames -- into obstacles that have a velocity. Without it DWA
+    // plans against a still photograph; Phase 11 measured what that costs.
+    TrackerConfig tcfg;
+    tcfg.cluster_gap_m = declare_parameter("tracker.cluster_gap_m", 0.18);
+    tcfg.max_cluster_extent_m =
+      declare_parameter("tracker.max_cluster_extent_m", 1.00);
+    tcfg.association_gate_m =
+      declare_parameter("tracker.association_gate_m", 0.45);
+    tcfg.velocity_filter_tau_s =
+      declare_parameter("tracker.velocity_filter_tau_s", 0.30);
+    tcfg.min_tracked_speed_m_s =
+      declare_parameter("tracker.min_tracked_speed_m_s", 0.12);
+    tcfg.max_tracked_speed_m_s =
+      declare_parameter("tracker.max_tracked_speed_m_s", 3.00);
+    tcfg.max_track_age_s = declare_parameter("tracker.max_track_age_s", 0.60);
+    tcfg.min_hits_before_trusted = static_cast<int>(
+      declare_parameter("tracker.min_hits_before_trusted", 3));
+    tracker_ = std::make_unique<ObstacleTracker>(tcfg);
     cfg.collision_check_step_m = declare_parameter("collision_check_step_m", 0.02);
     cfg.in_place_rotation_speed =
       declare_parameter("in_place_rotation_speed", 0.05);
@@ -171,11 +194,17 @@ private:
     // just walked in front of the robot, which is the entire point of having a
     // local planner.
     std::vector<ObstaclePoint> obstacles;
+    std::size_t moving_points = 0;
     if (scan_) {
-      obstacles.reserve(scan_->ranges.size() / obstacle_stride_ + 1);
-      for (std::size_t i = 0; i < scan_->ranges.size();
-           i += static_cast<std::size_t>(obstacle_stride_))
-      {
+      // EVERY return feeds the tracker, not every third. Clustering decides
+      // where one object ends and the next begins from the gap between
+      // CONSECUTIVE returns, and striding by three triples that gap -- at 3 m
+      // with a 1 degree increment it grows from 5 cm to 15 cm, close enough to
+      // the 18 cm cluster threshold that one object starts splitting into
+      // several, each with its own half-measured velocity.
+      std::vector<ScanPoint> all_points;
+      all_points.reserve(scan_->ranges.size());
+      for (std::size_t i = 0; i < scan_->ranges.size(); ++i) {
         const float r = scan_->ranges[i];
         if (!std::isfinite(r) || r < scan_->range_min || r > obstacle_range_) {
           continue;
@@ -183,8 +212,42 @@ private:
         const double a = scan_->angle_min +
           static_cast<double>(i) * scan_->angle_increment;
         // The scan is in lidar_link, which is 0.14 m ahead of base_link.
-        obstacles.push_back({lidar_offset_x_ + r * std::cos(a), r * std::sin(a)});
+        all_points.push_back(
+          {lidar_offset_x_ + r * std::cos(a), r * std::sin(a)});
       }
+
+      // The tracker differences centroids in a FIXED frame, so it needs the
+      // robot's pose there. `map_to_base` maps map coordinates into the base
+      // frame; the robot's pose in the map is its inverse.
+      const arb_core::Pose2D base_in_map = map_to_base.inverse();
+      const double stamp = rclcpp::Time(scan_->header.stamp).seconds();
+      tracker_->update(all_points, base_in_map, stamp);
+      const auto moving = tracker_->movingInRobotFrame(base_in_map);
+
+      // The collision check still uses a strided subset -- 120 points instead
+      // of 360 is a third of the work for the same answer on surfaces this
+      // smooth. Each keeps the velocity of the moving track it belongs to.
+      obstacles.reserve(all_points.size() / obstacle_stride_ + 1);
+      for (std::size_t i = 0; i < all_points.size();
+           i += static_cast<std::size_t>(obstacle_stride_))
+      {
+        ObstaclePoint o{all_points[i].x, all_points[i].y, 0.0, 0.0};
+        for (const auto & m : moving) {
+          // Belongs to this track if it is inside the track's own footprint
+          // plus a margin. Nearest-track-wins would smear a velocity across
+          // the wall behind a passing object.
+          const double reach = 0.5 * m.extent_m + 0.25;
+          if (std::hypot(o.x - m.x, o.y - m.y) <= reach) {
+            o.vx = m.vx;
+            o.vy = m.vy;
+            ++moving_points;
+            break;
+          }
+        }
+        obstacles.push_back(o);
+      }
+      tracked_moving_ = moving.size();
+      moving_obstacle_points_ = moving_points;
     }
 
     const DwaResult r = planner_->plan(
@@ -200,13 +263,18 @@ private:
     RCLCPP_INFO(
       get_logger(),
       "DWA: %lu cycles (%lu with no admissible command) | last: v=%.3f w=%.3f, "
-      "%d/%d candidates admissible, %.2f ms | no tf %lu",
+      "%d/%d candidates admissible, %.2f ms | moving obstacles %lu "
+      "(%lu points) | no tf %lu",
       cycles_, failed_cycles_, last_v_, last_w_,
       last_result_.candidates_admissible, last_result_.candidates_evaluated,
-      last_result_.planning_time_ms, no_tf_);
+      last_result_.planning_time_ms, tracked_moving_, moving_obstacle_points_,
+      no_tf_);
   }
 
   std::unique_ptr<DynamicWindowPlanner> planner_;
+  std::unique_ptr<ObstacleTracker> tracker_;
+  std::size_t tracked_moving_{0};
+  std::size_t moving_obstacle_points_{0};
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
   std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;

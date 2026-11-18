@@ -2,6 +2,7 @@
 #ifndef ARB_PLANNING__DYNAMIC_WINDOW_HPP_
 #define ARB_PLANNING__DYNAMIC_WINDOW_HPP_
 
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -10,11 +11,27 @@
 namespace arb_planning
 {
 
-/// A point obstacle in the ROBOT frame.
+/// A point obstacle in the ROBOT frame, optionally with a velocity.
+///
+/// `vx`/`vy` are the obstacle's velocity IN THE WORLD, expressed in the
+/// robot's current axes. Zero for everything the tracker has not identified as
+/// moving, which is almost everything -- walls, crates, the floor plan.
+///
+/// A velocity of zero makes the prediction below a no-op, so a caller that
+/// knows nothing about motion keeps exactly the old behaviour.
 struct ObstaclePoint
 {
   double x{0.0};
   double y{0.0};
+  double vx{0.0};
+  double vy{0.0};
+
+  /// Where this obstacle will be `t` seconds from now, in the frame the robot
+  /// occupies NOW. Constant velocity: a pedestrian does not accelerate much
+  /// inside a two-second horizon, and a turn-rate estimate from a laser
+  /// centroid is noise.
+  double xAt(double t) const {return x + vx * t;}
+  double yAt(double t) const {return y + vy * t;}
 };
 
 struct DwaConfig
@@ -101,6 +118,31 @@ struct DwaConfig
   /// a collision check.
   bool enforce_stopping_distance{true};
 
+  /// Advance each obstacle along its measured velocity while checking a
+  /// rollout, instead of treating the world as a still photograph.
+  ///
+  /// False reproduces the Phase 11 behaviour exactly, which is how the two are
+  /// compared: the same binary, one parameter, same course, same seeds.
+  bool predict_obstacle_motion{true};
+
+  /// How far ahead a collision with a MOVING obstacle is disqualifying.
+  ///
+  /// Static and moving obstacles get different admissibility rules, and the
+  /// reason is physical rather than a tuning preference.
+  ///
+  /// For something that holds still, "can I stop before it" is the right
+  /// question, and `v <= sqrt(2 d a)` answers it. Requiring the whole horizon
+  /// to be clear instead makes a robot with 0.45 m of room at 0.3 m/s find no
+  /// admissible command and stop dead.
+  ///
+  /// For something that is coming towards you, stopping does not help -- it
+  /// arrives anyway. The question is not "can I stop" but "will I be there
+  /// when it is", and the answer has to be no. Measured: with the stopping
+  /// rule applied to a crossing obstacle, the cap only binds at 0.12 m of
+  /// separation, by which point the collision is already unavoidable, and
+  /// prediction fixed none of the collisions in a timing sweep.
+  double moving_obstacle_horizon_s{2.0};
+
   /// Below this the robot is treated as stopped, and in-place rotation is
   /// allowed even where forward motion is blocked.
   double in_place_rotation_speed{0.05};
@@ -133,6 +175,10 @@ struct DwaCandidate
   double min_clearance{0.0};
   double distance_to_collision{0.0};
   std::vector<arb_core::Pose2D> rollout;
+
+  /// Seconds until this command would meet a moving obstacle. Infinite when
+  /// nothing is predicted to cross it inside the horizon.
+  double time_to_moving_collision{std::numeric_limits<double>::infinity()};
 };
 
 struct DwaResult
@@ -158,6 +204,12 @@ struct DwaResult
   /// turning on the spot. Reported so a caller can tell "blocked and looking
   /// for a way out" apart from "arrived", which otherwise both read as v = 0.
   bool rotating_in_place{false};
+
+  /// True when no command cleared a moving obstacle and the planner took the
+  /// one that buys the most time instead. Distinguishes "best effort under a
+  /// threat" from "arrived" and from "boxed in by walls", which otherwise all
+  /// read as a small or zero velocity.
+  bool evading{false};
 };
 
 /// The Dynamic Window Approach (Fox, Burgard and Thrun, 1997).
@@ -212,6 +264,11 @@ public:
   /// Closest approach of a rollout to any obstacle. Infinite when clear.
   double clearance(const std::vector<arb_core::Pose2D> & poses,
                    const std::vector<ObstaclePoint> & obstacles) const;
+
+  /// Seconds until this curvature first puts the footprint on a MOVING
+  /// obstacle, or infinity if it never does within `simulation_time`.
+  double timeToCollision(double v, double omega,
+                         const std::vector<ObstaclePoint> & obstacles) const;
 
   /// Arc length along the (v, omega) curvature before the footprint first
   /// touches an obstacle, or infinity if it never does.

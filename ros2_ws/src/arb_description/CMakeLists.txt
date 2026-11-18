@@ -3,11 +3,19 @@ project(arb_description VERSION 0.1.0)
 
 find_package(ament_cmake REQUIRED)
 
+# `launch` is deliberately absent. The directory exists on the machine this
+# was written on, empty, and git does not track empty directories -- so a
+# fresh clone had no launch/ and ament_cmake_symlink_install failed the whole
+# build with "can't find .../arb_description/launch". It built here and
+# nowhere else, for weeks, until CI ran on a clean checkout and said so on its
+# first attempt.
+#
+# This package has no launch files. They belong to the packages whose nodes
+# they start: arb_simulation, arb_sensors, arb_localization and so on.
 install(DIRECTORY
   urdf
   meshes
   rviz
-  launch
   DESTINATION share/${PROJECT_NAME}
 )
 

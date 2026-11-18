@@ -130,6 +130,36 @@
 
     in_place_rotation_speed: 0.05
 
+    # --- moving obstacles ---------------------------------------------
+    # Advance each obstacle along its measured velocity while checking a
+    # rollout, instead of treating the world as a still photograph. False
+    # reproduces the Phase 11 behaviour exactly, which is how the two are
+    # compared: same binary, one parameter, same course, same seeds.
+    predict_obstacle_motion: true
+
+    # Static and moving obstacles get different admissibility rules.
+    # "Can I stop before it" is the right question for something that holds
+    # still; for something coming towards you, stopping does not help, and
+    # the question is whether you will be there when it is.
+    moving_obstacle_horizon_s: 2.0
+
+    # The tracker turns a scan -- points with no correspondence between
+    # frames -- into obstacles that have a velocity.
+    tracker:
+      cluster_gap_m: 0.18
+      # Wider than this is structure, not an object: a wall's centroid slides
+      # along it as the robot moves and would manufacture a velocity out of
+      # pure geometry. The crossing obstacle is 0.40 m across.
+      max_cluster_extent_m: 1.00
+      association_gate_m: 0.45
+      velocity_filter_tau_s: 0.30
+      min_tracked_speed_m_s: 0.12
+      # Above this an association is wrong, not the world: two different
+      # objects were matched to each other.
+      max_tracked_speed_m_s: 3.00
+      max_track_age_s: 0.60
+      min_hits_before_trusted: 3
+
     # Obstacles come straight from the scan, not the map: the map is at best
     # two seconds old and cannot contain anything that has just walked in
     # front of the robot, which is the entire point of a local planner.

@@ -76,10 +76,14 @@ class NavStack:
     """The full navigation stack, optionally with a moving obstacle."""
 
     def __init__(self, sensor_params: pathlib.Path, log: pathlib.Path,
-                 with_obstacle: bool):
+                 with_obstacle: bool, predict: bool = True):
         self.sensor_params = sensor_params
         self.log = log
         self.with_obstacle = with_obstacle
+        # Whether the local planner advances obstacles along their measured
+        # velocity. False reproduces the Phase 11 planner exactly, so the two
+        # arms differ by one parameter and nothing else.
+        self.predict = predict
         self.procs: list[subprocess.Popen] = []
 
     def _spawn(self, *args: str) -> subprocess.Popen:
@@ -108,7 +112,8 @@ class NavStack:
         time.sleep(2)
         self.procs.append(self._spawn(
             "ros2", "launch", "arb_planning", "planning.launch.py",
-            "local_planner:=true", "unknown_is_lethal:=false"))
+            "local_planner:=true", "unknown_is_lethal:=false",
+            f"predict_obstacle_motion:={'true' if self.predict else 'false'}"))
         if self.with_obstacle:
             self.procs.append(self._spawn(
                 "ros2", "run", "arb_evaluation", "moving_obstacle", "--ros-args",
@@ -138,10 +143,13 @@ class NavStack:
 
 
 def run_one(seed: int, with_obstacle: bool, out_dir: pathlib.Path,
-            work: pathlib.Path) -> dict | None:
-    tag = f"nav_{'obstacle' if with_obstacle else 'clear'}_seed{seed}"
+            work: pathlib.Path, predict: bool = True) -> dict | None:
+    arm = "obstacle" if with_obstacle else "clear"
+    if with_obstacle and not predict:
+        arm = "obstacle_blind"
+    tag = f"nav_{arm}_seed{seed}"
     params = sensor_params_with_seeds(seed, work / f"sensors_seed{seed}.yaml")
-    stack = NavStack(params, work / f"{tag}.log", with_obstacle)
+    stack = NavStack(params, work / f"{tag}.log", with_obstacle, predict)
     try:
         stack.up()
         result = subprocess.run(
@@ -166,6 +174,7 @@ def run_one(seed: int, with_obstacle: bool, out_dir: pathlib.Path,
     metrics = json.loads(path.read_text())
     metrics["seed"] = seed
     metrics["with_obstacle"] = with_obstacle
+    metrics["predict_obstacle_motion"] = predict
     path.write_text(json.dumps(metrics, indent=2))
     return metrics
 
@@ -186,12 +195,23 @@ FIELDS = [
 ]
 
 
-def collect(out_dir: pathlib.Path) -> dict[bool, list[dict]]:
-    groups: dict[bool, list[dict]] = {True: [], False: []}
+#: The three arms, in report order.
+ARMS = ("clear", "obstacle_blind", "obstacle_predict")
+
+
+def arm_of(m: dict) -> str:
+    if not m.get("with_obstacle"):
+        return "clear"
+    return ("obstacle_predict" if m.get("predict_obstacle_motion", True)
+            else "obstacle_blind")
+
+
+def collect(out_dir: pathlib.Path) -> dict[str, list[dict]]:
+    groups: dict[str, list[dict]] = {a: [] for a in ARMS}
     for path in sorted(out_dir.glob("metrics_goal_nav_*.json")):
         m = json.loads(path.read_text())
         if "with_obstacle" in m:
-            groups[bool(m["with_obstacle"])].append(m)
+            groups[arm_of(m)].append(m)
     return groups
 
 
@@ -218,31 +238,40 @@ def summarise(runs: list[dict]) -> dict:
     return out
 
 
-def plot(groups: dict[bool, list[dict]], out_dir: pathlib.Path) -> pathlib.Path | None:
-    if not any(groups.values()):
-        return None
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.4))
-    labels = ["clear corridor", "crossing obstacle"]
-    colours = ["#1971c2", "#e8590c"]
+LABELS = {
+    "clear": "clear corridor",
+    "obstacle_blind": "obstacle, no prediction",
+    "obstacle_predict": "obstacle, predicted",
+}
+COLOURS = {"clear": "#1971c2", "obstacle_blind": "#e03131",
+           "obstacle_predict": "#2f9e44"}
 
-    for ax, (key, label, _) in zip(axes, [FIELDS[4], FIELDS[1]]):
-        data = [[r[key] for r in groups[flag]
-                 if r.get(key) is not None and math.isfinite(r[key])]
-                for flag in (False, True)]
-        positions = [0, 1]
-        for pos, values, colour in zip(positions, data, colours):
+
+def plot(groups: dict[str, list[dict]], out_dir: pathlib.Path):
+    present = [a for a in ARMS if groups.get(a)]
+    if not present:
+        return None
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.6))
+    panels = [("min_obstacle_clearance_m", "true obstacle clearance [m]"),
+              ("time_s", "time to goal [s]")]
+    for ax, (key, label) in zip(axes, panels):
+        for pos, arm in enumerate(present):
+            values = [r[key] for r in groups[arm]
+                      if r.get(key) is not None and math.isfinite(r[key])]
             if not values:
                 continue
-            ax.scatter([pos] * len(values), values, color=colour, zorder=3, s=45)
+            ax.scatter([pos] * len(values), values, color=COLOURS[arm],
+                       zorder=3, s=55)
             ax.plot([pos - 0.18, pos + 0.18], [np.mean(values)] * 2,
-                    color=colour, lw=2.5, zorder=2)
-        ax.set_xticks(positions)
-        ax.set_xticklabels(labels)
+                    color=COLOURS[arm], lw=2.5, zorder=2)
+        ax.set_xticks(range(len(present)))
+        ax.set_xticklabels([LABELS[a] for a in present], fontsize=8)
         ax.set_ylabel(label)
         ax.grid(alpha=0.25, axis="y")
-    axes[0].axhline(0.12, color="#c2255c", ls=":", lw=1.2, label="contact")
+    # Zero clearance is contact; below it the two bodies overlap.
+    axes[0].axhline(0.0, color="#c2255c", ls=":", lw=1.4, label="contact")
     axes[0].legend(fontsize=8)
-    fig.suptitle("Phase 11 -- navigation with an obstacle that is not on the map")
+    fig.suptitle("Phase 11 -- navigation past an obstacle that is not on the map")
     path = out_dir / "sweep_dynamic_obstacle.png"
     fig.tight_layout()
     fig.savefig(path, dpi=140)
@@ -250,26 +279,33 @@ def plot(groups: dict[bool, list[dict]], out_dir: pathlib.Path) -> pathlib.Path 
     return path
 
 
-def report(groups: dict[bool, list[dict]], out_dir: pathlib.Path) -> pathlib.Path:
-    clear, blocked = summarise(groups[False]), summarise(groups[True])
-    lines = ["| metric | clear corridor | crossing obstacle |", "|---|---|---|"]
-    lines.append(f"| runs | {clear.get('runs', 0)} | {blocked.get('runs', 0)} |")
-    lines.append(f"| arrived | {clear.get('arrived', 0)} / {clear.get('runs', 0)} "
-                 f"| {blocked.get('arrived', 0)} / {blocked.get('runs', 0)} |")
-    lines.append(f"| touched the obstacle (ground truth) | {clear.get('touched', 0)} "
-                 f"| {blocked.get('touched', 0)} |")
-    lines.append(f"| runs with a beam inside range_min | {clear.get('blind_spot', 0)} "
-                 f"| {blocked.get('blind_spot', 0)} |")
+def report(groups: dict[str, list[dict]], out_dir: pathlib.Path) -> pathlib.Path:
+    present = [a for a in ARMS if groups.get(a)]
+    summaries = {a: summarise(groups[a]) for a in present}
+    head = "| metric | " + " | ".join(LABELS[a] for a in present) + " |"
+    lines = [head, "|" + "---|" * (len(present) + 1)]
+
+    def row(name, fn):
+        lines.append(f"| {name} | "
+                     + " | ".join(fn(summaries[a]) for a in present) + " |")
+
+    row("runs", lambda d: str(d.get("runs", 0)))
+    row("arrived", lambda d: f"{d.get('arrived', 0)} / {d.get('runs', 0)}")
+    row("touched the obstacle (ground truth)",
+        lambda d: str(d.get("touched", 0)))
+    row("runs with a beam inside range_min",
+        lambda d: str(d.get("blind_spot", 0)))
     for key, label, spec in FIELDS:
         if key == "arrived":
             continue
 
-        def cell(d: dict) -> str:
+        def cell(d, key=key, spec=spec):
             mean = d.get(f"{key}_mean")
             if mean is None:
                 return "--"
             return f"{mean:{spec}} ± {d.get(f'{key}_std', 0.0):{spec}}"
-        lines.append(f"| {label} | {cell(clear)} | {cell(blocked)} |")
+        row(label, cell)
+
     path = out_dir / "dynamic_obstacle.md"
     path.write_text("\n".join(lines) + "\n")
     return path
@@ -292,16 +328,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"working directory {work}")
         # Paired: the same seed with and without, back to back, so a drift in
         # machine load between the halves cannot masquerade as an effect.
-        plan = [(seed, flag) for seed in args.seeds for flag in (False, True)]
+        # Three arms per seed, run back to back so a drift in machine load
+        # cannot masquerade as an effect:
+        #   clear          -- no obstacle, the baseline
+        #   obstacle_blind -- obstacle, prediction OFF (the Phase 11 planner)
+        #   obstacle       -- obstacle, prediction ON
+        plan = [(seed, flag, predict)
+                for seed in args.seeds
+                for flag, predict in ((False, True), (True, False), (True, True))]
         started = time.time()
         try:
-            for i, (seed, flag) in enumerate(plan, start=1):
+            for i, (seed, flag, predict) in enumerate(plan, start=1):
                 eta = ((time.time() - started) / (i - 1) * (len(plan) - i + 1) / 60
                        if i > 1 else 0)
-                print(f"  [{i}/{len(plan)}] seed={seed} "
-                      f"{'obstacle' if flag else 'clear'} (eta {eta:.0f} min)",
-                      flush=True)
-                run_one(seed, flag, out_dir, work)
+                arm = ("clear" if not flag
+                       else ("obstacle+predict" if predict else "obstacle+blind"))
+                print(f"  [{i}/{len(plan)}] seed={seed} {arm} "
+                      f"(eta {eta:.0f} min)", flush=True)
+                run_one(seed, flag, out_dir, work, predict)
         finally:
             shutil.rmtree(work, ignore_errors=True)
 

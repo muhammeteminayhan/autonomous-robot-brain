@@ -62,9 +62,26 @@ double DynamicWindowPlanner::clearance(
 {
   if (obstacles.empty()) {return kInf;}
   double worst = kInf;
-  for (const auto & pose : poses) {
+  // The rollout is generated at a FIXED TIME STEP, so pose i happens at
+  // i * simulation_dt and the obstacles can be advanced to meet it.
+  //
+  // Making only distanceToCollision time-aware is not enough, and the reason
+  // is worth stating. That function feeds the admissible-velocity condition,
+  // which asks "can the robot STOP before this". With a crossing obstacle the
+  // answer is usually yes -- the robot has plenty of room to stop, it simply
+  // does not stop, it keeps going and arrives exactly when the obstacle does.
+  // The hard constraint is satisfied and the collision happens anyway.
+  //
+  // What actually changes the decision is the SCORE: a candidate whose
+  // rollout passes through where the obstacle will be has to look bad, so a
+  // different candidate wins. Measured: with only the constraint made
+  // time-aware, the chosen command was byte-identical to the static-world one.
+  for (std::size_t i = 0; i < poses.size(); ++i) {
+    const double t = config_.predict_obstacle_motion
+      ? static_cast<double>(i) * config_.simulation_dt : 0.0;
     for (const auto & o : obstacles) {
-      const double d = std::hypot(o.x - pose.x, o.y - pose.y) - config_.robot_radius;
+      const double d = std::hypot(o.xAt(t) - poses[i].x, o.yAt(t) - poses[i].y)
+        - config_.robot_radius;
       worst = std::min(worst, d);
       // No early exit on a negative value: the MINIMUM over the whole
       // trajectory is what the score needs, and a trajectory that grazes an
@@ -72,6 +89,37 @@ double DynamicWindowPlanner::clearance(
     }
   }
   return worst;
+}
+
+double DynamicWindowPlanner::timeToCollision(
+  double v, double omega, const std::vector<ObstaclePoint> & obstacles) const
+{
+  if (obstacles.empty()) {return kInf;}
+
+  // Stepped in TIME, not arc length, because the question is a time one:
+  // when does this curvature put the robot where that obstacle will be? The
+  // robot may be stationary and still be hit, so there is no speed to divide
+  // by and no arc length to step along.
+  const double dt = config_.simulation_dt;
+  const double horizon = config_.moving_obstacle_horizon_s;
+
+  arb_core::Pose2D p;
+  for (double t = 0.0; t <= horizon + 1e-9; t += dt) {
+    for (const auto & o : obstacles) {
+      if (std::hypot(o.xAt(t) - p.x, o.yAt(t) - p.y)
+          <= config_.robot_radius + config_.collision_margin)
+      {
+        return t;
+      }
+    }
+    const double half = 0.5 * omega * dt;
+    const double chord = v * dt * sinc(half);
+    const double heading_mid = p.theta + half;
+    p.x += chord * std::cos(heading_mid);
+    p.y += chord * std::sin(heading_mid);
+    p.theta = arb_core::normalizeAngle(p.theta + omega * dt);
+  }
+  return kInf;
 }
 
 double DynamicWindowPlanner::distanceToCollision(
@@ -92,8 +140,16 @@ double DynamicWindowPlanner::distanceToCollision(
   // not depend on how fast the robot happens to be going.
   if (std::abs(v) < 1e-9) {
     // A stationary or rotating-in-place command never advances, so the only
-    // question is whether it is already touching something.
+    // question is whether anything REACHES the robot while it sits there.
+    // Standing still is not automatically safe when the obstacle is the thing
+    // that moves -- which is exactly how Phase 11's collision happened: DWA
+    // commanded a stop and the obstacle walked into the stationary robot.
+    const double window = config_.predict_obstacle_motion
+      ? config_.simulation_time : 0.0;
     for (const auto & o : obstacles) {
+      for (double t = 0.0; t <= window + 1e-9; t += config_.simulation_dt) {
+        if (std::hypot(o.xAt(t), o.yAt(t)) <= config_.robot_radius) {return 0.0;}
+      }
       if (std::hypot(o.x, o.y) <= config_.robot_radius) {return 0.0;}
     }
     return kInf;
@@ -103,10 +159,17 @@ double DynamicWindowPlanner::distanceToCollision(
   arb_core::Pose2D p;
   double travelled = 0.0;
   double last_clear = 0.0;
+  double elapsed = 0.0;
   const int max_steps = 5000;
   for (int i = 0; i <= max_steps; ++i) {
+    // Each step of the rollout happens at a known TIME, so the obstacle can be
+    // advanced to meet it. Stepping by arc length keeps the spatial resolution
+    // independent of speed; dividing by |v| recovers the time that step took.
+    const double t_ahead = config_.predict_obstacle_motion ? elapsed : 0.0;
     for (const auto & o : obstacles) {
-      if (std::hypot(o.x - p.x, o.y - p.y) <= config_.robot_radius) {
+      if (std::hypot(o.xAt(t_ahead) - p.x, o.yAt(t_ahead) - p.y)
+          <= config_.robot_radius)
+      {
         // Round DOWN to the last point known to be clear. Reporting the
         // distance at which contact was DETECTED overstates the room available
         // by up to one step, and the admissible-velocity condition then passes
@@ -117,6 +180,7 @@ double DynamicWindowPlanner::distanceToCollision(
     last_clear = travelled;
     if (travelled > horizon) {break;}
 
+    elapsed += dt;
     const double half = 0.5 * omega * dt;
     const double chord = v * dt * sinc(half);
     const double heading_mid = p.theta + half;
@@ -161,6 +225,18 @@ DwaResult DynamicWindowPlanner::plan(
                                current_omega + config_.max_angular_acceleration * dt);
 
   const double goal_distance = std::hypot(goal.x, goal.y);
+
+  // Static and moving obstacles are judged by different rules, so they are
+  // separated once rather than re-tested per candidate. An obstacle counts as
+  // moving only when prediction is enabled; with it off, everything is static
+  // and the behaviour is the Phase 11 behaviour exactly.
+  std::vector<ObstaclePoint> static_obstacles, moving_obstacles;
+  static_obstacles.reserve(obstacles.size());
+  for (const auto & o : obstacles) {
+    const bool moving = config_.predict_obstacle_motion &&
+      std::hypot(o.vx, o.vy) > 1e-6;
+    (moving ? moving_obstacles : static_obstacles).push_back(o);
+  }
 
   // --- the carrot ---------------------------------------------------------
   // `path_lookahead_m` FURTHER ALONG the path than the robot's projection onto
@@ -224,7 +300,11 @@ DwaResult DynamicWindowPlanner::plan(
       c.omega = w;
       c.rollout = rollout(v, w);
       c.min_clearance = clearance(c.rollout, obstacles);
-      c.distance_to_collision = distanceToCollision(v, w, obstacles);
+      // Static obstacles answer "can I stop before it"; moving obstacles
+      // answer "will I be there when it is". Mixing them into one distance
+      // loses the distinction, which is the whole point.
+      c.distance_to_collision = distanceToCollision(v, w, static_obstacles);
+      c.time_to_moving_collision = timeToCollision(v, w, moving_obstacles);
       ++result.candidates_evaluated;
 
       // Already in contact at the robot's CURRENT position: nothing this
@@ -255,6 +335,23 @@ DwaResult DynamicWindowPlanner::plan(
           candidates.push_back(std::move(c));
           continue;
         }
+      }
+
+      // AND THE MOVING-OBSTACLE RULE, which is strict where the one above is
+      // permissive. Being able to stop is no help against something coming
+      // towards you: it arrives regardless. A command that puts the robot
+      // where a moving obstacle will be, at any point inside the horizon, is
+      // rejected outright.
+      //
+      // This is the rule that would be far too strict for static obstacles --
+      // it is "keep the whole horizon clear", which strands a robot with
+      // 0.45 m of room. It is right here because the obstacle will have moved
+      // on: refusing to enter its path for two seconds costs two seconds,
+      // while entering it costs a collision.
+      if (std::isfinite(c.time_to_moving_collision)) {
+        c.rejection = "a moving obstacle gets there first";
+        candidates.push_back(std::move(c));
+        continue;
       }
 
       c.admissible = true;
@@ -314,8 +411,46 @@ DwaResult DynamicWindowPlanner::plan(
   }
 
   if (result.candidates_admissible == 0) {
-    // Every forward option is blocked. Rotating in place is still safe if the
-    // robot is nearly stopped, and it is the only way out of a dead end.
+    // EVASION BEFORE SURRENDER.
+    //
+    // When a moving obstacle has disqualified every forward command, stopping
+    // is not a safe default -- it is how the Phase 11 collision happened, and
+    // it is how the first version of this rule reproduced it: the planner
+    // rejected everything, commanded zero, and the obstacle walked into a
+    // stationary robot. Measured, that version fixed none of the collisions
+    // in a timing sweep and made two of them slightly worse.
+    //
+    // So before giving up, take the command that buys the most TIME. Reverse
+    // is in the window and is often the answer. It is a best effort, not a
+    // guarantee -- but "the latest possible contact" strictly dominates
+    // "contact now while standing still".
+    if (!moving_obstacles.empty()) {
+      const DwaCandidate * best_effort = nullptr;
+      for (const auto & c : candidates) {
+        if (c.rejection != "a moving obstacle gets there first") {continue;}
+        if (best_effort == nullptr ||
+            c.time_to_moving_collision > best_effort->time_to_moving_collision ||
+            (c.time_to_moving_collision == best_effort->time_to_moving_collision &&
+             c.distance_to_collision > best_effort->distance_to_collision))
+        {
+          best_effort = &c;
+        }
+      }
+      if (best_effort != nullptr) {
+        result.success = true;
+        result.v = best_effort->v;
+        result.omega = best_effort->omega;
+        result.best = *best_effort;
+        result.best.admissible = true;
+        result.evading = true;
+        escape_direction_ = 0;
+        return finish("evading: no command clears the moving obstacle");
+      }
+    }
+
+    // Every forward option is blocked by something that is not going to move.
+    // Rotating in place is still safe if the robot is nearly stopped, and it
+    // is the only way out of a dead end.
     if (std::abs(current_v) < config_.in_place_rotation_speed) {
       // Turn towards the AIM POINT -- the carrot when there is a path, the goal
       // otherwise -- and COMMIT to that direction until a forward command

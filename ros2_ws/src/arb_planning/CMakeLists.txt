@@ -23,7 +23,7 @@ find_package(tf2_ros REQUIRED)
 add_library(${PROJECT_NAME}_core SHARED
   src/grid_planner.cpp
   src/dynamic_window.cpp
-)
+  src/obstacle_tracker.cpp)
 target_include_directories(${PROJECT_NAME}_core PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
   "$<INSTALL_INTERFACE:include>")
@@ -62,6 +62,8 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_dynamic_window test/test_dynamic_window.cpp)
   target_link_libraries(test_dynamic_window ${PROJECT_NAME}_core)
+  ament_add_gtest(test_obstacle_tracker test/test_obstacle_tracker.cpp)
+  target_link_libraries(test_obstacle_tracker ${PROJECT_NAME}_core)
 endif()
 
 ament_export_include_directories(include)
