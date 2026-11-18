@@ -9,7 +9,7 @@ Gazebo estimates its own pose from noisy IMU, wheel-encoder and 2D LiDAR data,
 maps its surroundings, plans a collision-free route to a goal, and keeps doing
 so while its sensors are deliberately degraded and failed.
 
-> **Project status: all 12 phases complete and verified.**
+> **Project status: all 12 phases built; measured claims are listed with their evidence, and one defect is open.**
 > A six-state EKF fuses wheel odometry, the IMU gyroscope and LiDAR scan
 > matching against a map the robot builds itself. Against ground truth over a
 > 10 m route it cuts position RMSE by **68 %** and heading RMSE by **61 %**
@@ -27,7 +27,12 @@ so while its sensors are deliberately degraded and failed.
 > between **0.04 and 0.05 rad/s**, a **40x** change in gyro noise costs only
 > **1.7x** in error, **11 of 360** LiDAR beams are enough to localise — and the
 > local planner **collides with a crossing obstacle in 3 of 3 runs**, because
-> DWA has no model of obstacle velocity. See
+> DWA has no model of obstacle velocity. An obstacle tracker was added to fix
+> that and **has not yet earned its place**: it reports phantom movers —
+> peaking at 9 in a world containing one — and the comparison meant to
+> justify it turned out to be measuring nothing, because the baseline arm
+> had been silently configured identically to the treatment arm. Both are
+> written up rather than quietly dropped. See
 > [Verification status](#verification-status) for exactly what has been run.
 
 ![The robot's own map, the A* plan and the EKF pose, in RViz](docs/images/rviz_navigation.png)

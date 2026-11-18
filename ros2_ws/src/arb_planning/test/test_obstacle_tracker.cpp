@@ -354,6 +354,167 @@ TEST(Tracker, APoseThatJUMPSMakesTheStaticWorldLookAlive)
     << "entire reason the frame choice matters";
 }
 
+/// A wall segment, for the little ray caster below.
+struct Segment { double x0, y0, x1, y1; };
+
+/// Distance from `o` along unit direction `d` to a segment, or -1.
+double hitDistance(double ox, double oy, double dx, double dy,
+                   const Segment & s)
+{
+  const double ex = s.x1 - s.x0, ey = s.y1 - s.y0;
+  const double denom = dx * ey - dy * ex;
+  if (std::abs(denom) < 1e-12) {return -1.0;}        // parallel
+  const double t = ((s.x0 - ox) * ey - (s.y0 - oy) * ex) / denom;
+  const double u = ((s.x0 - ox) * dy - (s.y0 - oy) * dx) / denom;
+  return (t > 1e-6 && u >= 0.0 && u <= 1.0) ? t : -1.0;
+}
+
+/// A full 360-degree scan of a closed room, in angular order.
+///
+/// It has to be closed and it has to be 360 degrees. A fan that stops at
+/// some angle truncates whatever wall it was crossing, and the leftover
+/// sliver is a small cluster bounded by further-away returns -- an object
+/// by every test the tracker can apply, and an artefact of the fan rather
+/// than of the world. The first version of this test was fooled by exactly
+/// that, which is a fair warning about synthetic scans.
+std::vector<ScanPoint> scanRoom(double rx, double ry,
+                                const std::vector<Segment> & world,
+                                int beams = 360)
+{
+  std::vector<ScanPoint> out;
+  for (int i = 0; i < beams; ++i) {
+    const double a = 2.0 * M_PI * i / beams;
+    const double dx = std::cos(a), dy = std::sin(a);
+    double best = -1.0;
+    for (const auto & s : world) {
+      const double d = hitDistance(rx, ry, dx, dy, s);
+      if (d > 0.0 && (best < 0.0 || d < best)) {best = d;}
+    }
+    if (best > 0.0) {out.push_back({rx + best * dx, ry + best * dy});}
+  }
+  return out;
+}
+
+/// A room 6 x 3 m with a 0.30 m doorway in its north wall, and another wall
+/// 1 m beyond the doorway. Nothing in it moves.
+std::vector<Segment> roomWithADoorway()
+{
+  return {
+    {-3.0, 1.0, 0.85, 1.0}, {1.15, 1.0, 3.0, 1.0},   // north wall + doorway
+    {-3.0, 2.0, 3.0, 2.0},                            // the wall beyond it
+    {-3.0, -2.0, 3.0, -2.0},                          // south
+    {-3.0, -2.0, -3.0, 1.0}, {3.0, -2.0, 3.0, 1.0},   // west, east
+  };
+}
+
+TEST(Tracker, AWallSeenThroughADoorwayIsNotAnObject)
+{
+  // `DoesNotTrackWallsAsObjects` passes because its wall is visible end to
+  // end, so the cluster is 4 m wide and the structure filter rejects it.
+  // Real walls are not seen end to end. Through a 0.30 m doorway only a
+  // short section returns, the cluster sits well under the 1.0 m threshold,
+  // and the filter has nothing to reject -- while the visible window slides
+  // along the wall as the robot moves, carrying the centroid with it.
+  //
+  // Nothing here moves. The walls are fixed, the doorway is fixed, the pose
+  // is exact. Any velocity reported is manufactured out of geometry.
+  //
+  // Measured in the simulator before the aperture rule existed, this was
+  // the dominant phantom source: in a world with exactly one moving object,
+  // 121 of 144 logged cycles reported more than one mover, peaking at 8,
+  // and the phantom rate predicted whether the run reached its goal
+  // (r = -0.73) far better than the planner setting under test did
+  // (r = -0.17).
+  ObstacleTracker tracker{TrackerConfig{}};
+  const auto world = roomWithADoorway();
+
+  Pose2D robot(-1.0, 0.0, 0.0);
+  for (int i = 0; i < 14; ++i) {
+    const double t = i * 0.1;
+    robot.x = -1.0 + 0.5 * t;                        // a steady 0.5 m/s
+    const auto scan = scanRoom(robot.x, robot.y, world);
+    ASSERT_GT(scan.size(), 300u) << "the room is not closed at step " << i;
+    tracker.update(toRobot(scan, robot), robot, t);
+  }
+
+  EXPECT_TRUE(tracker.movingInRobotFrame(robot).empty())
+    << "a wall seen through a doorway was reported as a moving object";
+  EXPECT_GT(tracker.lastRejectedAsOccluded(), 0u)
+    << "the far wall section was never recognised as a view through a gap, "
+    << "so if this test passes it passes for some other reason";
+}
+
+TEST(Tracker, AnObjectHiddenDownOneSideIsStillAnObject)
+{
+  // This is why the rule needs BOTH neighbours to be nearer.
+  //
+  // Half-hidden objects are the normal case, not the exception: anything
+  // standing near a corner, a doorframe or another object is clipped on one
+  // side. Those clusters are bounded by a nearer return on that side and by
+  // the background on the other, and they are still objects. Requiring only
+  // one near side would discard them -- and a collision avoider that stops
+  // believing in half-occluded obstacles is worse than one with no filter
+  // at all, because the things it drops are the ones it is about to hit.
+  //
+  // Geometry: a stub at y = 1 casts a shadow over x in [0.4, 0.6] at y = 2,
+  // clipping the left of an object spanning [0.5, 0.9]. The background is
+  // the north wall 1 m behind it.
+  const std::vector<Segment> world = {
+    {-3.0, 1.0, -0.6, 1.0}, {0.2, 1.0, 0.3, 1.0},    // south-ish wall + stub
+    {0.5, 2.0, 0.9, 2.0},                             // the object
+    {-3.0, 3.0, 3.0, 3.0},                            // background wall
+    {-3.0, -2.0, 3.0, -2.0},                          // south
+    {-3.0, -2.0, -3.0, 3.0}, {3.0, -2.0, 3.0, 3.0},   // west, east
+  };
+
+  ObstacleTracker tracker{TrackerConfig{}};
+  const Pose2D robot(0.0, 0.0, 0.0);
+  for (int i = 0; i < 6; ++i) {
+    const auto scan = scanRoom(robot.x, robot.y, world, 720);
+    ASSERT_GT(scan.size(), 600u);
+    tracker.update(scan, robot, i * 0.1);
+  }
+
+  EXPECT_EQ(tracker.lastRejectedAsOccluded(), 0u)
+    << "an object clipped on ONE side was mistaken for a view through a "
+    << "gap; the rule must require both neighbours to be nearer";
+
+  bool found = false;
+  for (const auto & tr : tracker.tracks()) {
+    if (std::abs(tr.y - 2.0) < 0.25 && tr.x > 0.3 && tr.x < 1.1) {found = true;}
+  }
+  EXPECT_TRUE(found) << "the half-occluded object was not tracked at all";
+}
+
+TEST(Tracker, AnObjectInTheOpenSurvivesTheApertureRule)
+{
+  // The complement, and the reason the rule needs BOTH sides to be nearer:
+  // an object standing in front of a background is bounded by returns from
+  // FURTHER away. Rejecting on one near side would throw away every object
+  // standing beside a wall, which is most of them.
+  ObstacleTracker tracker{TrackerConfig{}};
+  Pose2D robot(0.0, 0.0, 0.0);
+  for (int i = 0; i < 12; ++i) {
+    const double t = i * 0.1;
+    std::vector<ScanPoint> scan;
+    // Background wall at y = 4, left half.
+    for (double x = -3.0; x < 0.6; x += 0.05) {scan.push_back({x, 4.0});}
+    // A small object at y = 2, drifting sideways at 0.3 m/s.
+    const double ox = 0.8 + 0.3 * t;
+    for (double d = -0.15; d <= 0.15; d += 0.05) {scan.push_back({ox + d, 2.0});}
+    // Background wall again, right half.
+    for (double x = 1.4; x <= 3.0; x += 0.05) {scan.push_back({x, 4.0});}
+    tracker.update(toRobot(scan, robot), robot, t);
+  }
+
+  EXPECT_EQ(tracker.lastRejectedAsOccluded(), 0u)
+    << "an object in front of a background was mistaken for a view "
+    << "through a gap";
+  const auto moving = tracker.movingInRobotFrame(robot);
+  ASSERT_EQ(moving.size(), 1u) << "the real mover was lost";
+  EXPECT_NEAR(moving.front().vx, 0.3, 0.08);
+}
+
 TEST(Tracker, ResetClearsEverything)
 {
   ObstacleTracker tracker{TrackerConfig{}};

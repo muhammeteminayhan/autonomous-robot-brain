@@ -70,6 +70,8 @@ public:
       declare_parameter("tracker.max_cluster_extent_m", 1.00);
     tcfg.association_gate_m =
       declare_parameter("tracker.association_gate_m", 0.45);
+    tcfg.aperture_margin_m =
+      declare_parameter("tracker.aperture_margin_m", 0.10);
     tcfg.velocity_filter_tau_s =
       declare_parameter("tracker.velocity_filter_tau_s", 0.30);
     tcfg.min_tracked_speed_m_s =

@@ -181,34 +181,65 @@ hemen robot eksenlerine geri döndürülüyor. Yani **doğruluk değil,
 pürüzsüzlük** gerekiyor. Bunlar farklı şeyler ve bu proje bunu zor yoldan
 öğretti.
 
-Peki ölçüm ne dedi? **Burada dürüst olmak gerekiyor.**
+Peki ölçüm ne dedi? **Çerçeve asıl sorun değilmiş.**
 
 İlk koşum muhteşem görünüyordu: hayalet ortalaması 0.8, hedefe 39.6 s'de
-varış, +0.151 m açıklık. Tabloyu yazmaya başlamıştım bile. Sonra aynı
-yapılandırmayı tekrar koşturdum: **hayalet ortalaması 3.84, en çok 9**, ve
-robot 180 s zaman aşımına düşüp engele 0.35 m girdi.
+varış. Tabloyu yazmaya başlamıştım. Sonra aynı yapılandırmayı tekrar
+koşturdum: **ortalama 3.84, en çok 9 hayalet**, 180 s zaman aşımı.
 
 ```
 Aynı kod. Aynı tohum. Aynı komut.
-  1. koşum: ortalama 0.8 hayalet, vardı
-  2. koşum: ortalama 3.84 hayalet, varamadı
+  1. koşum: 0.8 hayalet, vardı
+  2. koşum: 3.84 hayalet, varamadı
 
--> Yani n=1 ile "düzeldi" demek, ölçüm değil TEMENNİ idi.
+-> n=1 ile "düzeldi" demek ölçüm değil, TEMENNİdir.
 ```
 
-Doğru sonuç şu: **çerçeve değişikliği gerekçesi sağlam ama faydası
-ölçülmedi**, ve hayalet izler **açık bir kusur olarak duruyor**. `map→odom`
-süreksizliği sahte hızın *bir* kaynağıydı; baskın kaynağı değilmiş.
+Çerçeve değişikliği doğru ama yetersizdi. Asıl suçluyu bir test değil, bir
+**log satırı** buldu: her izin konumunu, hızını, genişliğini ve yaşını
+saniyede bir yazdırınca örüntü ortaya çıktı.
 
-En olası suçlu artık çerçeve değil, **küme kararsızlığı**: iki tarama
-arasında bölünen ya da birleşen bir küme kendi merkezini oynatır, eşleştirme
-adımı ise bunu gerçek hareketten ayıramaz. Ama bu bir **hipotez**, sonuç
-değil — ve aradaki farkı karıştırmamak bu projenin tüm meselesi.
+```
+[-1.70,0.71 v=0.31 ext=0.43 hits=218]
+[-2.22,0.68 v=0.32 ext=0.45 hits=238]
+[-2.70,0.60 v=0.26 ext=0.31 hits=258]
+```
 
-> **Not:** İkinci koşum da tam temiz değildi — koşarken `moving_obstacle.py`'yi
-> düzenledim, yani test edilen sistemi altından değiştirdim. Sonucu yine de
-> yazıyorum çünkü hayalet sayısı o dosyaya bağlı değil, ama bu bir metodoloji
-> hatasıydı: **ölçüm sürerken ölçülen şeye dokunulmaz.**
+Robotun arkasına doğru, robotun kendi hızıyla, yüzlerce çevrim yaşayan,
+0.3–0.45 m genişliğinde izler. Dünyada hiçbir şey böyle davranmaz. Ama
+**kayan bir pencere** aynen böyle davranır.
+
+### Genişlik, "küçük nesne" ile "büyük şeyin küçük parçası"nı ayıramaz
+
+`DoesNotTrackWallsAsObjects` geçiyordu, çünkü oradaki duvar **baştan sona
+görünür**: küme 4 m, yapı filtresi reddediyor. Gerçek duvarlar baştan sona
+görünmez. 0.3 m'lik bir kapı aralığından duvar, 1.0 m eşiğinin çok altında
+bir parça döndürür — filtrenin reddedecek bir şeyi yoktur. Ve robot
+ilerledikçe görünür pencere duvar boyunca kayar, merkezi de peşinden.
+
+Ayrım genişlikte değil, **kümeyi neyin sınırladığında**:
+
+| | sınırlayan | |
+|---|---|---|
+| açıkta duran nesne | daha uzaktaki dönüşler ya da hiç dönüş yok | gerçek kenar |
+| aralıktan bakış | **iki yanda da** daha yakın dönüşler | aralığın kendisi |
+
+Kural: bir kümenin iki açısal komşusu da ondan `aperture_margin_m` kadar
+yakınsa, küme atılır. **İkisi de**, "biri" değil — köşeden ya da kapı
+kasasından tek yanı kırpılmış nesne istisna değil kuraldır, ve yarı örtülü
+engellere inanmayı bırakan bir kaçınma algoritması, hiç filtresi olmayandan
+**daha kötüdür**: attığı şeyler tam da çarpmak üzere olduklarıdır.
+
+Bunu `AnObjectHiddenDownOneSideIsStillAnObject` koruyor — ve yazılması
+şarttı: `&&` yerine `||` koyan mutasyon, ilk test setinden **fark edilmeden
+geçti**. Yani kuralın yarısı test edilmiyormuş.
+
+> **Sentetik tarama tuzağı.** Kapı testinin ilk hâli yanlış sebeple
+> düşüyordu. Yelpazem ±1.0 radyandı; bu, kestiği duvarın ucunda 0.41 m'lik
+> bir "nesne" bırakıyordu — komşuları daha uzak olduğu için kurala takılmayan,
+> tamamen **testin kendi kenarından** doğan bir yapaylık. Doğrusu: kapalı oda
+> + gerçek ışın izleyici + tam 360°. Sentetik tarama üretirken dünyanın
+> değil, taramanın sınırlarını ölçme riski her zaman vardır.
 
 > **Mülakat sorusu olarak:** "`map` ve `odom` arasındaki fark nedir?" sorusuna
 > herkes "biri global, biri lokal" der. Asıl cevap: **`odom` pürüzsüz ama

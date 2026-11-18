@@ -71,6 +71,22 @@ struct TrackerConfig
   /// Clusters wider than this are structure, not objects, and are not tracked.
   /// The crossing obstacle is 0.40 m across; a corridor wall is metres.
   double max_cluster_extent_m{1.00};
+  /// How much nearer a cluster's angular neighbours must be before the
+  /// cluster counts as something seen THROUGH a gap rather than an object
+  /// standing in the open.
+  ///
+  /// Extent alone cannot tell "a small object" from "a small piece of a big
+  /// one". A wall seen through a doorway returns a section well under
+  /// `max_cluster_extent_m`, so the structure filter has nothing to reject,
+  /// and the visible window slides along the wall as the robot moves --
+  /// carrying the centroid with it at roughly the robot's own speed. That
+  /// was the dominant source of phantom movers in this stack.
+  ///
+  /// The discriminator is what BOUNDS the cluster. An object standing in
+  /// the open is bounded by returns from further away, or by no return at
+  /// all. A view through an aperture is bounded on both sides by returns
+  /// that are NEARER -- the thing being looked past.
+  double aperture_margin_m{0.10};
 
   std::size_t min_cluster_points{2};
 
@@ -155,6 +171,20 @@ public:
 
   /// Segment a scan into clusters. Exposed for testing; the gap rule is the
   /// part most likely to be wrong and the easiest to check in isolation.
+  /// A half-open range of indices into the scan the clusters came from.
+  /// Needed because what bounds a cluster matters as much as its contents,
+  /// and a vector of points has thrown that away.
+  struct ClusterSpan
+  {
+    std::size_t begin{0};
+    std::size_t end{0};
+  };
+
+  /// Clusters as index ranges, in scan order.
+  static std::vector<ClusterSpan> clusterSpans(
+    const std::vector<ScanPoint> & points, double gap_m,
+    std::size_t min_points);
+
   static std::vector<std::vector<ScanPoint>> cluster(
     const std::vector<ScanPoint> & points, double gap_m,
     std::size_t min_points);
@@ -171,13 +201,22 @@ public:
   /// and walls are being tracked as objects.
   std::size_t lastRejectedAsStructure() const {return rejected_as_structure_;}
 
+  /// Clusters dropped in the last update for being a view through a gap.
+  std::size_t lastRejectedAsOccluded() const {return rejected_as_occluded_;}
+
 private:
   TrackerConfig config_;
   std::vector<ObstacleTrack> tracks_;
   int next_id_{1};
   double previous_stamp_s_{0.0};
   bool have_previous_{false};
+  /// True when the cluster is bounded on both sides by nearer returns,
+  /// which means it is a piece of something seen through a gap.
+  bool seenThroughAGap(const std::vector<ScanPoint> & points,
+                       const ClusterSpan & span) const;
+
   std::size_t rejected_as_structure_{0};
+  std::size_t rejected_as_occluded_{0};
 };
 
 }  // namespace arb_planning

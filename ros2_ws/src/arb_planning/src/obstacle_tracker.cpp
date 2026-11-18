@@ -8,23 +8,35 @@
 namespace arb_planning
 {
 
-std::vector<std::vector<ScanPoint>> ObstacleTracker::cluster(
+std::vector<ObstacleTracker::ClusterSpan> ObstacleTracker::clusterSpans(
   const std::vector<ScanPoint> & points, double gap_m, std::size_t min_points)
 {
-  std::vector<std::vector<ScanPoint>> out;
+  std::vector<ClusterSpan> out;
   if (points.empty()) {return out;}
 
-  std::vector<ScanPoint> current{points.front()};
+  std::size_t begin = 0;
   for (std::size_t i = 1; i < points.size(); ++i) {
     const double d = std::hypot(points[i].x - points[i - 1].x,
                                 points[i].y - points[i - 1].y);
     if (d > gap_m) {
-      if (current.size() >= min_points) {out.push_back(current);}
-      current.clear();
+      if (i - begin >= min_points) {out.push_back({begin, i});}
+      begin = i;
     }
-    current.push_back(points[i]);
   }
-  if (current.size() >= min_points) {out.push_back(current);}
+  if (points.size() - begin >= min_points) {
+    out.push_back({begin, points.size()});
+  }
+  return out;
+}
+
+std::vector<std::vector<ScanPoint>> ObstacleTracker::cluster(
+  const std::vector<ScanPoint> & points, double gap_m, std::size_t min_points)
+{
+  std::vector<std::vector<ScanPoint>> out;
+  for (const auto & span : clusterSpans(points, gap_m, min_points)) {
+    out.emplace_back(points.begin() + static_cast<std::ptrdiff_t>(span.begin),
+                     points.begin() + static_cast<std::ptrdiff_t>(span.end));
+  }
   return out;
 }
 
@@ -42,10 +54,47 @@ void ObstacleTracker::describe(const std::vector<ScanPoint> & c,
   *extent = std::hypot(c.back().x - c.front().x, c.back().y - c.front().y);
 }
 
+namespace
+{
+double rangeOf(const ScanPoint & p) {return std::hypot(p.x, p.y);}
+}  // namespace
+
+bool ObstacleTracker::seenThroughAGap(const std::vector<ScanPoint> & points,
+                                      const ClusterSpan & span) const
+{
+  // What BOUNDS a cluster says more about it than its width does.
+  //
+  // An object standing in the open is bounded by returns from further away
+  // (the background) or by no return at all. A view through a doorway is
+  // bounded on BOTH sides by nearer returns -- the thing being looked past.
+  // Only the second case makes the extent meaningless, so both sides must
+  // be nearer before the cluster is dropped; one near side is an ordinary
+  // partial occlusion and the object is still an object.
+  //
+  // The scan wraps, so the neighbour of the first point is the last. A
+  // cluster that straddles the wrap is split in two and each half is judged
+  // on its own -- a known limitation, and a conservative one: the halves
+  // keep their outer neighbours and are less likely to be dropped, not more.
+  const std::size_t n = points.size();
+  if (n < 3 || span.end - span.begin >= n) {return false;}
+
+  double near = std::numeric_limits<double>::max();
+  for (std::size_t i = span.begin; i < span.end; ++i) {
+    near = std::min(near, rangeOf(points[i]));
+  }
+  const double threshold = near - config_.aperture_margin_m;
+
+  const std::size_t left = (span.begin == 0) ? n - 1 : span.begin - 1;
+  const std::size_t right = (span.end == n) ? 0 : span.end;
+  return rangeOf(points[left]) < threshold &&
+         rangeOf(points[right]) < threshold;
+}
+
 void ObstacleTracker::update(const std::vector<ScanPoint> & points,
                              const arb_core::Pose2D & robot, double stamp_s)
 {
   rejected_as_structure_ = 0;
+  rejected_as_occluded_ = 0;
 
   const double dt = have_previous_ ? (stamp_s - previous_stamp_s_) : 0.0;
   previous_stamp_s_ = stamp_s;
@@ -60,15 +109,25 @@ void ObstacleTracker::update(const std::vector<ScanPoint> & points,
 
   struct Candidate { double x, y, extent; };
   std::vector<Candidate> candidates;
-  for (const auto & cl : cluster(points, config_.cluster_gap_m,
-                                 config_.min_cluster_points))
-  {
+  const auto spans = clusterSpans(points, config_.cluster_gap_m,
+                                  config_.min_cluster_points);
+  for (const auto & span : spans) {
+    const std::vector<ScanPoint> cl(
+      points.begin() + static_cast<std::ptrdiff_t>(span.begin),
+      points.begin() + static_cast<std::ptrdiff_t>(span.end));
     double cx = 0.0, cy = 0.0, extent = 0.0;
     describe(cl, &cx, &cy, &extent);
     if (extent > config_.max_cluster_extent_m) {
       // Structure, not an object. A wall's centroid slides along it as the
       // robot moves and would manufacture a velocity out of pure geometry.
       ++rejected_as_structure_;
+      continue;
+    }
+    if (seenThroughAGap(points, span)) {
+      // Small, but only because most of it is hidden. Its extent is a lower
+      // bound on the object behind the gap, not a measurement of it, and
+      // its centroid tracks the moving window rather than any object.
+      ++rejected_as_occluded_;
       continue;
     }
     // Robot frame -> fixed frame. Differencing in the robot frame would

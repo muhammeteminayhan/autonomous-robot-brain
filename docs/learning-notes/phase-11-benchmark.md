@@ -115,6 +115,79 @@ kolay bir problemdir.
 Tablolar: [`docs/benchmarks.md`](../benchmarks.md) bölüm 4, ve
 `results/phase11/benchmark_report.md`.
 
+## 7b. Bir deneyin ölçtüğünü sandığı şeyi ölçmemesinin üç yolu
+
+Hareketli engel karşılaştırması üç kez üst üste geçersiz çıktı, ve üçü de
+farklı cinsten. Bu bölüm, sonuçlardan daha öğreticiydi.
+
+### 1. Sessizce yutulan argüman
+
+Temel kol şöyle kuruluyordu:
+
+```bash
+ros2 launch arb_planning planning.launch.py predict_obstacle_motion:=false
+```
+
+Launch dosyası bu argümanı **tanımlamıyordu**. `ros2 launch` bilinmeyen bir
+`ad:=değer` çiftini kabul eder, atar ve sıfırla çıkar. Uyarı yok. Koşum
+YAML varsayılanıyla devam eder ve **yapılandırılmış bir koşumdan ayırt
+edilemez**.
+
+```
+Sonuç: "öngörüsüz" kolun her koşumu öngörü YAPIYORDU.
+       İki kol tek bir yapılandırmanın iki örneğiydi.
+```
+
+Bu kaza bir işe yaradı: **gürültü tabanını** ölçtü. Hiçbir şeyde farklı
+olmayan iki kol 110 ± 36 s ve 140 ± 56 s verdi. Yani o büyüklükteki bir
+"fark", fark değildir.
+
+Ders: *bir etiket bir ölçüm değildir.* Artık koşum, başlattıktan sonra
+düğüme parametrenin gerçek değerini soruyor ve uyuşmazsa koşmayı reddediyor.
+Ayrıca `test_launch_arguments.py` her betiğin geçirdiği argümanın gerçekten
+tanımlı olduğunu denetliyor.
+
+### 2. Kontrol edilmeyen bağımsız değişken
+
+Engelin fazı, **spawn çağrısının döndüğü ana** sabitlenmişti — ki o an
+`/clock`'u, Gazebo'yu ve bir servis gidiş-dönüşünü bekler, yani koşumdan
+koşuma saniyelerle oynar. Oysa robotun engelle **karşılaşıp karşılaşmaması**
+tamamen o faza bağlı.
+
+```
+Aynı tohum, aynı ikili:
+  bir koşumda 39.6 s'de temiz varış
+  bir koşumda 180 s zaman aşımı ve 0.39 m içine girme
+```
+
+Kodun yorumu "her koşumda birebir tekrarlanır" diyordu. Yorum, kodu
+okumuyordu.
+
+Düzeltme: faz artık **sim saatine** bağlı ve `phase_offset_s` ile dışarıdan
+veriliyor. Böylece karşılaşma umut edilen değil **süpürülen** bir şey oldu,
+ve iki kol aynı karşılaşmalarda eşleştirilerek karşılaştırılabiliyor. Bir
+düzine koşumu yeterli kılan şey budur: soru "planlayıcı ne kadar hızlı"
+değil, "**bu aynı karşılaşmada** öngörü işe yarıyor mu".
+
+### 3. Bir önceki koşumdan sağ kalan simülatör
+
+`ros2 launch` bir ruby sarmalayıcı başlatır, o da asıl `gz sim`'i. Kapanışta
+sarmalayıcıya sinyal gider, sarmalayıcı ölür ve bunu loglar — ama **torun**
+süreç sağ kalabilir. Sağ kalan simülatör bir sonraki koşumla aynı dünyayı ve
+aynı taşıma katmanını paylaşır, ve **iki logun hiçbiri bunu söylemez**. Koşum
+sadece tuhaf davranır, sayılar da "değişkenlik" gibi görünür.
+
+Bir yetim süreci elle yakaladıktan sonra, ondan önceki süpürmenin temiz
+olduğunu **kanıtlayamadım** — bu yüzden o verinin sonuçları, bu şüphe
+yazılarak raporlanıyor. Düzenek artık her koşumdan önce kalıntı varsa
+**başlamayı reddediyor**, her kapanıştan sonra da arta kalanı öldürüp
+bildiriyor.
+
+> **Üçünün ortak dersi:** bir deneyin en tehlikeli hatası, deneyi
+> *çökertmeyen* hatadır. Üçü de sessizdi, üçü de makul görünen sayılar
+> üretti, ve üçü de ancak sayılara "bu neden böyle?" diye sorulunca ortaya
+> çıktı. Yeşil bir koşum, doğru bir koşum değildir.
+
 ## 8. Bu taramaların söyleyemediği şeyler
 
 - **Üç tohum.** Bir etkinin saçılmayı aşıp aşmadığını görmeye yeter; bir

@@ -151,6 +151,14 @@
       # along it as the robot moves and would manufacture a velocity out of
       # pure geometry. The crossing obstacle is 0.40 m across.
       max_cluster_extent_m: 1.00
+      # How much nearer a cluster's angular neighbours must be before the
+      # cluster counts as a view THROUGH a gap rather than an object. Extent
+      # cannot tell a small object from a small piece of a big one: a wall
+      # seen through a doorway returns a section far under the extent limit,
+      # and its visible window slides along the wall as the robot moves.
+      # What distinguishes them is the boundary -- an object in the open is
+      # bounded by returns from further away, a doorway by nearer ones.
+      aperture_margin_m: 0.10
       association_gate_m: 0.45
       velocity_filter_tau_s: 0.30
       min_tracked_speed_m_s: 0.12

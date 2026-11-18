@@ -260,30 +260,55 @@ It is right for a moving obstacle precisely because the obstacle will move on.
 Refusing to enter its path for two seconds costs two seconds; entering it
 costs a collision.
 
-#### Why `map` is wrong here, and what is still unexplained
+#### Two frames, and then the thing that was actually wrong
 
-The reasoning above is sound and the change stands: a quantity obtained by
-differencing needs a frame that is smooth over the differencing interval, and
-`map` is specified not to be one.
+The frame reasoning stands on its own: a quantity obtained by differencing
+needs a frame that is smooth over the differencing interval, and REP-105
+specifies `map → odom` not to be one. Tracking moved to `odom`, and
+`Tracker.APoseThatJUMPSMakesTheStaticWorldLookAlive` pins the hazard down by
+feeding an unchanged scan with a pose that jumps 15 cm and asserting that a
+phantom appears.
 
-What that change did **not** do is make the phantoms go away. Measured over
-two runs of the same configuration, the tracker reported a mean of 0.8 moving
-obstacles in one and 3.8 in the other, peaking at 9 — in a world containing
-exactly one moving object. So `map → odom` discontinuity was *a* source of
-false velocity, but it is not the dominant one, and the planner is still
-being handed obstacles that do not exist.
+It was not the main problem. After the move the tracker still reported up to
+nine movers in a world containing one, so something else was manufacturing
+velocity — and the diagnostic that found it was not a test but a log line.
+Printing each track's position, speed, extent and age, once a second, showed
+tracks living for hundreds of cycles, receding behind the robot at roughly
+the robot's own speed, with extents of 0.3 to 0.45 m. Nothing in the world
+does that. A **sliding window** does.
 
-**Status: the frame fix is justified but its benefit is not measured, and the
-phantom tracks are an open defect.** The cause is most likely cluster
-instability rather than the frame — a cluster that splits or merges between
-scans moves its own centroid, and the association step cannot tell that from
-motion — but that is a hypothesis, not a result.
+#### Extent cannot tell a small object from a small piece of a big one
 
-`Tracker.APoseThatJUMPSMakesTheStaticWorldLookAlive` pins down the part that
-*is* established: it feeds an unchanged scan with a pose that jumps 15 cm and
-asserts the tracker reports a phantom. It is a characterisation test — it
-asserts the limitation, because the limitation cannot be fixed from inside
-the tracker and the caller is the one who has to supply a smooth frame.
+`DoesNotTrackWallsAsObjects` passes because its wall is visible end to end:
+the cluster is 4 m wide and the structure filter rejects it. Real walls are
+not seen end to end. Through a 0.3 m doorway a wall returns a section well
+under the 1.0 m threshold, so the filter has nothing to reject — and the
+visible window slides along the wall as the robot moves, carrying the
+centroid with it.
+
+What separates the two cases is not the cluster's width but **what bounds
+it**:
+
+| | bounded by | |
+|---|---|---|
+| an object in the open | returns from further away, or no return | real edges |
+| a view through a gap | nearer returns on **both** sides | the aperture |
+
+So a cluster is discarded when both of its angular neighbours are nearer
+than it by more than `aperture_margin_m`. Both, not either: an object clipped
+on one side by a corner or a doorframe is the normal case, not the exception,
+and a collision avoider that stops believing in half-occluded obstacles is
+worse than one with no filter at all — the things it drops are the ones it is
+about to hit. `AnObjectHiddenDownOneSideIsStillAnObject` holds that line, and
+it had to be written: the first version of the test suite let a mutation
+weakening `&&` to `||` pass unnoticed.
+
+The doorway test needs a **closed room and a full 360° scan**, which is worth
+saying because the first version had neither. A fan that stops at some angle
+truncates whatever wall it was crossing, and the leftover sliver is a small
+cluster bounded by further-away returns — an object by every test the tracker
+can apply, and an artefact of the fan rather than of the world. The test was
+failing for a reason that did not exist outside the test.
 
 #### Evasion before surrender
 

@@ -102,6 +102,15 @@ class NavStack:
             stderr=subprocess.STDOUT, start_new_session=True)
 
     def up(self) -> None:
+        # Refuse to start beside someone else's simulator. Two `gz sim`
+        # instances on the same world share a transport, and nothing in
+        # either log says so -- the run just behaves strangely and the
+        # numbers look like variance.
+        left = strays()
+        if left:
+            raise RuntimeError(
+                "simulator processes are already running; this run would "
+                "share a transport with them:\n  " + "\n  ".join(left))
         self.procs.append(self._spawn(
             "ros2", "launch", "arb_simulation", "simulation.launch.py",
             "headless:=true", "rviz:=false", "spawn:=spawn"))
@@ -149,6 +158,59 @@ class NavStack:
                     pass
         self.procs.clear()
         time.sleep(3)
+        # Signalling the launch tree is not enough: `gz sim` is a grandchild
+        # and survives its parent's death, which is how one run's simulator
+        # ends up inside the next one.
+        killed = kill_strays()
+        if killed:
+            print(f"    teardown left {killed} process(es) behind; killed")
+
+
+#: Processes that must not outlive a run. `gz sim` is the one that matters:
+#: ros2 launch starts a ruby wrapper which starts the simulator, teardown
+#: signals the wrapper, the wrapper dies and reports it -- and the actual
+#: simulator, a grandchild, can survive. It then sits on the same world and
+#: the same transport as the next run's, and nothing in either log says so.
+STRAY_PATTERNS = ("gz sim", "ros2 launch", "moving_obstacle")
+
+
+def strays() -> list[str]:
+    """Simulator-side processes still running, excluding our own ancestors."""
+    mine = set()
+    pid = os.getpid()
+    while pid > 1:
+        mine.add(pid)
+        try:
+            stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
+            pid = int(stat.rsplit(")", 1)[1].split()[1])
+        except (OSError, IndexError, ValueError):
+            break
+
+    out = []
+    for proc in pathlib.Path("/proc").iterdir():
+        if not proc.name.isdigit() or int(proc.name) in mine:
+            continue
+        try:
+            cmd = (proc / "cmdline").read_bytes().replace(b"\0", b" ").decode()
+        except OSError:
+            continue
+        if any(pat in cmd for pat in STRAY_PATTERNS):
+            out.append(f"{proc.name} {cmd.strip()[:90]}")
+    return out
+
+
+def kill_strays() -> int:
+    """SIGKILL whatever `strays` found. Returns how many were killed."""
+    killed = 0
+    for entry in strays():
+        try:
+            os.kill(int(entry.split()[0]), signal.SIGKILL)
+            killed += 1
+        except (ProcessLookupError, PermissionError, ValueError):
+            pass
+    if killed:
+        time.sleep(2)
+    return killed
 
 
 def actual_parameter(node: str, name: str) -> bool | None:
