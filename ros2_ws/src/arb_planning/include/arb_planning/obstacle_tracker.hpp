@@ -87,6 +87,27 @@ struct TrackerConfig
   /// all. A view through an aperture is bounded on both sides by returns
   /// that are NEARER -- the thing being looked past.
   double aperture_margin_m{0.10};
+  /// How much a cluster must bend, per metre of its own length, before it
+  /// counts as an object rather than a piece of flat surface.
+  ///
+  /// Extent says how BIG a cluster is; this says what SHAPE it is, and shape
+  /// is what separates the two. A wall is locally straight at any width, so
+  /// a piece of one deviates from a fitted line only by the sensor noise. A
+  /// cylinder cannot be straight: its visible arc bends.
+  ///
+  /// It is a RATIO, not a distance, and that is the whole point. A short
+  /// cluster bends less in absolute terms, so a fixed distance threshold
+  /// quietly means "objects must be large". Measured here: a half-occluded
+  /// 0.20 m cylinder deviates 0.024 m, which is under any threshold that
+  /// still catches walls -- and dropping a half-occluded obstacle is the
+  /// dangerous direction to be wrong in. Divided by its own length the same
+  /// cluster scores 0.078, well clear.
+  ///
+  /// Measured over ranges 1.5-7 m and occlusions down to 40 % visible: the
+  /// worst cylinder scores 0.063, the worst wall 0.020. The threshold sits
+  /// between them with about 1.8x of margin on each side.
+  double min_bend_ratio{0.035};
+  std::size_t min_points_for_shape{5};
 
   std::size_t min_cluster_points{2};
 
@@ -111,6 +132,17 @@ struct TrackerConfig
 
   /// A track not seen for this long is forgotten.
   double max_track_age_s{0.60};
+  /// How long a velocity may go unconfirmed before the track stops being
+  /// reported as moving.
+  ///
+  /// Ambiguous associations do not produce a velocity, which is right --
+  /// but leaving the old one in place is not. A spurious velocity, once
+  /// acquired, then outlives every chance to disprove it, keeps the track
+  /// above the moving threshold indefinitely, and the planner spends the
+  /// run dodging it. Measured: one run timed out 15.8 m from its goal that
+  /// way, scoring a flawless 6.03 m of obstacle clearance by never going
+  /// anywhere near it.
+  double max_velocity_age_s{0.40};
 
   /// Tracks must survive this many consecutive cycles before their velocity is
   /// reported. One association can be a coincidence; three in a row is an
@@ -119,6 +151,47 @@ struct TrackerConfig
 };
 
 /// One tracked cluster, in the FIXED frame.
+/// A census of what the tracker did, for diagnosis rather than for control.
+///
+/// The phantom rate alone says "the tracker sees 1.7 movers in a world with
+/// one". It cannot say WHY, and the three plausible causes want three
+/// different fixes: clusters splitting between scans, two objects associated
+/// to each other, or short-lived noise that never should have been trusted.
+/// Counting them separately is what makes the next change measurable instead
+/// of hopeful.
+struct TrackerStats
+{
+  std::size_t tracks_created{0};
+  std::size_t tracks_matched{0};
+  std::size_t tracks_aged_out{0};
+  /// One track with two or more candidates inside its gate: the cluster it
+  /// was following came apart, and whichever half wins moves the centroid.
+  std::size_t split_events{0};
+  /// One candidate with two or more tracks inside its gate: two things the
+  /// tracker believed were separate are now one cluster.
+  std::size_t merge_events{0};
+  /// Associations whose implied speed exceeded the cap, which means the
+  /// match was wrong rather than the world fast.
+  std::size_t speed_rejections{0};
+  /// Associations made while the pairing was ambiguous -- a track with two
+  /// candidates in its gate, or a candidate with two tracks. The match is
+  /// kept so the obstacle stays tracked; the velocity is not, because the
+  /// two centroids are not the same physical object twice.
+  std::size_t ambiguous_associations{0};
+  /// How dead tracks ended: a phantom from a split is usually short-lived
+  /// and never earns trust, so the split between these two says how much of
+  /// the problem is transient.
+  std::size_t died_untrusted{0};
+  std::size_t died_trusted{0};
+  std::size_t dead_hits_total{0};
+
+  double meanLifetimeHits() const
+  {
+    const std::size_t dead = died_untrusted + died_trusted;
+    return dead ? static_cast<double>(dead_hits_total) / dead : 0.0;
+  }
+};
+
 struct ObstacleTrack
 {
   int id{0};
@@ -129,6 +202,9 @@ struct ObstacleTrack
   double extent_m{0.0};
   int hits{0};
   double last_seen_s{0.0};
+  /// When the velocity was last computed from an unambiguous association.
+  /// A velocity nobody has confirmed lately is not evidence of motion.
+  double velocity_updated_s{0.0};
   bool trusted{false};         ///< enough hits for the velocity to be believed
 };
 
@@ -204,6 +280,13 @@ public:
   /// Clusters dropped in the last update for being a view through a gap.
   std::size_t lastRejectedAsOccluded() const {return rejected_as_occluded_;}
 
+  /// Clusters dropped in the last update for being flat.
+  std::size_t lastRejectedAsFlat() const {return rejected_as_flat_;}
+
+  /// Cumulative census since construction or the last resetStats().
+  const TrackerStats & stats() const {return stats_;}
+  void resetStats() {stats_ = TrackerStats{};}
+
 private:
   TrackerConfig config_;
   std::vector<ObstacleTrack> tracks_;
@@ -215,8 +298,15 @@ private:
   bool seenThroughAGap(const std::vector<ScanPoint> & points,
                        const ClusterSpan & span) const;
 
+  /// True when the cluster's points lie on a straight line to within the
+  /// sensor's noise, which makes it a piece of surface rather than an object.
+  bool isFlatSurface(const std::vector<ScanPoint> & cluster) const;
+
   std::size_t rejected_as_structure_{0};
   std::size_t rejected_as_occluded_{0};
+  std::size_t rejected_as_flat_{0};
+  TrackerStats stats_;
+  double latest_stamp_s_{0.0};
 };
 
 }  // namespace arb_planning

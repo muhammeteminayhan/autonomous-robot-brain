@@ -59,6 +59,43 @@ namespace
 double rangeOf(const ScanPoint & p) {return std::hypot(p.x, p.y);}
 }  // namespace
 
+bool ObstacleTracker::isFlatSurface(
+  const std::vector<ScanPoint> & cluster) const
+{
+  // The smaller principal component of the cluster IS its deviation from the
+  // best-fit line -- that is what principal components are -- so there is no
+  // need to fit the line, only to find the smaller eigenvalue of a 2x2
+  // covariance. Closed form, no iteration, no library.
+  if (cluster.size() < config_.min_points_for_shape) {return false;}
+
+  double mx = 0.0, my = 0.0;
+  for (const auto & p : cluster) {mx += p.x; my += p.y;}
+  mx /= static_cast<double>(cluster.size());
+  my /= static_cast<double>(cluster.size());
+
+  double sxx = 0.0, syy = 0.0, sxy = 0.0;
+  for (const auto & p : cluster) {
+    const double dx = p.x - mx, dy = p.y - my;
+    sxx += dx * dx; syy += dy * dy; sxy += dx * dy;
+  }
+  const double n = static_cast<double>(cluster.size());
+  sxx /= n; syy /= n; sxy /= n;
+
+  // Smaller eigenvalue of [[sxx, sxy], [sxy, syy]].
+  const double half_trace = 0.5 * (sxx + syy);
+  const double gap = std::sqrt(std::max(
+    0.0, half_trace * half_trace - (sxx * syy - sxy * sxy)));
+  const double smaller = half_trace - gap;
+  const double deviation = std::sqrt(std::max(0.0, smaller));
+
+  // Per unit length, so the verdict does not depend on how much of the
+  // object happens to be visible.
+  const double length = std::hypot(cluster.back().x - cluster.front().x,
+                                   cluster.back().y - cluster.front().y);
+  if (length < 1e-6) {return false;}
+  return deviation / length < config_.min_bend_ratio;
+}
+
 bool ObstacleTracker::seenThroughAGap(const std::vector<ScanPoint> & points,
                                       const ClusterSpan & span) const
 {
@@ -95,9 +132,11 @@ void ObstacleTracker::update(const std::vector<ScanPoint> & points,
 {
   rejected_as_structure_ = 0;
   rejected_as_occluded_ = 0;
+  rejected_as_flat_ = 0;
 
   const double dt = have_previous_ ? (stamp_s - previous_stamp_s_) : 0.0;
   previous_stamp_s_ = stamp_s;
+  latest_stamp_s_ = stamp_s;
   // A non-advancing or backwards clock cannot produce a velocity. Returning
   // early rather than dividing by it keeps a replayed bag or a paused
   // simulator from manufacturing infinities.
@@ -130,25 +169,108 @@ void ObstacleTracker::update(const std::vector<ScanPoint> & points,
       ++rejected_as_occluded_;
       continue;
     }
+    if (isFlatSurface(cl)) {
+      // Straight, so it is a piece of surface rather than an object, however
+      // short it happens to be. Extent cannot make this distinction: a wall
+      // is locally straight at every width, and the 0.4 m of it visible
+      // between two doorframes is well under the extent limit while still
+      // being a wall -- whose centroid slides as the robot moves, which is
+      // exactly how a stationary building acquires a velocity.
+      ++rejected_as_flat_;
+      continue;
+    }
     // Robot frame -> fixed frame. Differencing in the robot frame would
     // report every static object as moving at the robot's own speed.
     candidates.push_back({robot.x + c * cx - s * cy,
                           robot.y + s * cx + c * cy, extent});
   }
 
+  // Count split and merge BEFORE associating, because the greedy loop below
+  // consumes the evidence: once a candidate claims a track, the fact that a
+  // second candidate was also inside that track's gate is gone. Diagnosis
+  // only -- nothing here changes which candidate wins.
+  for (std::size_t i = 0; i < tracks_.size(); ++i) {
+    std::size_t in_gate = 0;
+    for (const auto & cand : candidates) {
+      if (std::hypot(tracks_[i].x - cand.x, tracks_[i].y - cand.y)
+          < config_.association_gate_m) {++in_gate;}
+    }
+    if (in_gate > 1) {++stats_.split_events;}
+  }
+  for (const auto & cand : candidates) {
+    std::size_t in_gate = 0;
+    for (const auto & tr : tracks_) {
+      if (std::hypot(tr.x - cand.x, tr.y - cand.y)
+          < config_.association_gate_m) {++in_gate;}
+    }
+    if (in_gate > 1) {++stats_.merge_events;}
+  }
+
+  // Which candidates and tracks are AMBIGUOUS. A track with two candidates
+  // in its gate came apart; a candidate with two tracks in its gate is two
+  // things that just became one. In both cases the winning pair is not the
+  // same physical object twice, so differencing its centroids measures the
+  // regrouping rather than any motion. The association still happens -- the
+  // obstacle must stay tracked -- but no velocity is taken from it, which is
+  // the same choice the speed cap already makes for a different reason.
+  std::vector<bool> track_ambiguous(tracks_.size(), false);
+  std::vector<bool> cand_ambiguous(candidates.size(), false);
+  for (std::size_t i = 0; i < tracks_.size(); ++i) {
+    std::size_t n = 0;
+    for (const auto & cand : candidates) {
+      if (std::hypot(tracks_[i].x - cand.x, tracks_[i].y - cand.y)
+          < config_.association_gate_m) {++n;}
+    }
+    if (n > 1) {track_ambiguous[i] = true;}
+  }
+  for (std::size_t j = 0; j < candidates.size(); ++j) {
+    std::size_t n = 0;
+    for (const auto & tr : tracks_) {
+      if (std::hypot(tr.x - candidates[j].x, tr.y - candidates[j].y)
+          < config_.association_gate_m) {++n;}
+    }
+    if (n > 1) {cand_ambiguous[j] = true;}
+  }
+
+  // Assign globally nearest pair first, rather than walking the candidates in
+  // SCAN ORDER and letting each take the nearest track still free. Scan order
+  // is an accident of where the laser started: the first candidate could take
+  // a track that fitted the second one far better, and the displaced track
+  // then either coasts or attaches to something else and invents a velocity.
+  // Sorting every in-gate pair by distance costs nothing at these sizes and
+  // removes the dependence on where the scan begins.
+  struct Pair { double d; std::size_t track, cand; };
+  std::vector<Pair> pairs;
+  for (std::size_t j = 0; j < candidates.size(); ++j) {
+    for (std::size_t i = 0; i < tracks_.size(); ++i) {
+      const double d = std::hypot(tracks_[i].x - candidates[j].x,
+                                  tracks_[i].y - candidates[j].y);
+      if (d < config_.association_gate_m) {pairs.push_back({d, i, j});}
+    }
+  }
+  std::sort(pairs.begin(), pairs.end(),
+            [](const Pair & a, const Pair & b) {
+              if (a.d != b.d) {return a.d < b.d;}
+              if (a.track != b.track) {return a.track < b.track;}
+              return a.cand < b.cand;        // total order, so it is stable
+            });
+
+  std::vector<std::size_t> match_of(candidates.size(), tracks_.size());
   std::vector<bool> claimed(tracks_.size(), false);
+  std::vector<bool> taken(candidates.size(), false);
+  for (const auto & pr : pairs) {
+    if (claimed[pr.track] || taken[pr.cand]) {continue;}
+    claimed[pr.track] = true;
+    taken[pr.cand] = true;
+    match_of[pr.cand] = pr.track;
+  }
+
   std::vector<ObstacleTrack> updated;
   updated.reserve(candidates.size() + tracks_.size());
 
-  for (const auto & cand : candidates) {
-    // Nearest unclaimed track inside the gate.
-    std::size_t best = tracks_.size();
-    double best_d = config_.association_gate_m;
-    for (std::size_t i = 0; i < tracks_.size(); ++i) {
-      if (claimed[i]) {continue;}
-      const double d = std::hypot(tracks_[i].x - cand.x, tracks_[i].y - cand.y);
-      if (d < best_d) {best_d = d; best = i;}
-    }
+  for (std::size_t j = 0; j < candidates.size(); ++j) {
+    const auto & cand = candidates[j];
+    const std::size_t best = match_of[j];
 
     if (best == tracks_.size()) {
       ObstacleTrack t;
@@ -158,16 +280,22 @@ void ObstacleTracker::update(const std::vector<ScanPoint> & points,
       t.extent_m = cand.extent;
       t.hits = 1;
       t.last_seen_s = stamp_s;
+      t.velocity_updated_s = stamp_s;
+      ++stats_.tracks_created;
       updated.push_back(t);
       continue;
     }
 
-    claimed[best] = true;
     ObstacleTrack t = tracks_[best];
-    if (can_differentiate) {
+    const bool ambiguous = track_ambiguous[best] || cand_ambiguous[j];
+    if (ambiguous) {++stats_.ambiguous_associations;}
+    if (can_differentiate && !ambiguous) {
       const double raw_vx = (cand.x - t.x) / dt;
       const double raw_vy = (cand.y - t.y) / dt;
       const double speed = std::hypot(raw_vx, raw_vy);
+      if (speed > config_.max_tracked_speed_m_s) {
+        ++stats_.speed_rejections;
+      }
       if (speed <= config_.max_tracked_speed_m_s) {
         // First-order low pass. alpha = dt / (tau + dt) is the exact
         // discretisation and stays stable for any dt.
@@ -175,6 +303,7 @@ void ObstacleTracker::update(const std::vector<ScanPoint> & points,
           ? dt / (config_.velocity_filter_tau_s + dt) : 1.0;
         t.vx += alpha * (raw_vx - t.vx);
         t.vy += alpha * (raw_vy - t.vy);
+        t.velocity_updated_s = stamp_s;
       }
       // Above max_tracked_speed_m_s the association is wrong, not the world:
       // two different objects were matched. Keep the previous velocity rather
@@ -186,6 +315,7 @@ void ObstacleTracker::update(const std::vector<ScanPoint> & points,
     t.hits += 1;
     t.last_seen_s = stamp_s;
     t.trusted = t.hits >= config_.min_hits_before_trusted;
+    ++stats_.tracks_matched;
     updated.push_back(t);
   }
 
@@ -199,6 +329,14 @@ void ObstacleTracker::update(const std::vector<ScanPoint> & points,
       // the object is hidden.
       if (can_differentiate) {t.x += t.vx * dt; t.y += t.vy * dt;}
       updated.push_back(t);
+    } else {
+      // Died of old age. How long it lived and whether it was ever believed
+      // separates a phantom from an object that went behind something: a
+      // split produces tracks that expire young and untrusted.
+      ++stats_.tracks_aged_out;
+      stats_.dead_hits_total += static_cast<std::size_t>(tracks_[i].hits);
+      if (tracks_[i].trusted) {++stats_.died_trusted;}
+      else {++stats_.died_untrusted;}
     }
   }
 
@@ -214,6 +352,12 @@ std::vector<ObstacleTrack> ObstacleTracker::movingInRobotFrame(
   for (const auto & t : tracks_) {
     if (!t.trusted) {continue;}
     if (std::hypot(t.vx, t.vy) < config_.min_tracked_speed_m_s) {continue;}
+    // A velocity nobody has been able to confirm lately is not evidence of
+    // motion. Without this the first spurious velocity a track acquires
+    // outlives every chance to disprove it.
+    if (latest_stamp_s_ - t.velocity_updated_s > config_.max_velocity_age_s) {
+      continue;
+    }
     ObstacleTrack r = t;
     const double dx = t.x - robot.x;
     const double dy = t.y - robot.y;

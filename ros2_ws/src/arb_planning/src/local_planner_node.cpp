@@ -72,6 +72,10 @@ public:
       declare_parameter("tracker.association_gate_m", 0.45);
     tcfg.aperture_margin_m =
       declare_parameter("tracker.aperture_margin_m", 0.10);
+    tcfg.min_bend_ratio =
+      declare_parameter("tracker.min_bend_ratio", 0.035);
+    tcfg.min_points_for_shape = static_cast<std::size_t>(
+      declare_parameter("tracker.min_points_for_shape", 5));
     tcfg.velocity_filter_tau_s =
       declare_parameter("tracker.velocity_filter_tau_s", 0.30);
     tcfg.min_tracked_speed_m_s =
@@ -329,6 +333,20 @@ private:
       last_result_.candidates_admissible, last_result_.candidates_evaluated,
       last_result_.planning_time_ms, tracked_moving_, moving_obstacle_points_,
       no_tf_);
+
+    // The census, not just the count. "1.7 movers in a world with one" does
+    // not say which of three causes to fix; these numbers do.
+    if (tracker_) {
+      const auto & s = tracker_->stats();
+      RCLCPP_INFO(
+        get_logger(),
+        "tracker census: created %lu matched %lu aged-out %lu | "
+        "splits %lu merges %lu speed-rejects %lu | "
+        "died untrusted %lu trusted %lu, mean life %.1f cycles",
+        s.tracks_created, s.tracks_matched, s.tracks_aged_out,
+        s.split_events, s.merge_events, s.speed_rejections,
+        s.died_untrusted, s.died_trusted, s.meanLifetimeHits());
+    }
   }
 
   bool log_tracks_{false};

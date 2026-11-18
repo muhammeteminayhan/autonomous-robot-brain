@@ -369,6 +369,24 @@ double hitDistance(double ox, double oy, double dx, double dy,
   return (t > 1e-6 && u >= 0.0 && u <= 1.0) ? t : -1.0;
 }
 
+/// A cylinder, as the segments a ray caster can hit.
+///
+/// The crossing obstacle in this project is a 0.20 m cylinder, and once the
+/// tracker tests SHAPE a flat stand-in stops standing in for it: a segment
+/// is a piece of wall by every measure the tracker has. Two of the tests
+/// below used one and had to be corrected.
+std::vector<Segment> circle(double cx, double cy, double r, int sides = 24)
+{
+  std::vector<Segment> out;
+  for (int i = 0; i < sides; ++i) {
+    const double a0 = 2.0 * M_PI * i / sides;
+    const double a1 = 2.0 * M_PI * (i + 1) / sides;
+    out.push_back({cx + r * std::cos(a0), cy + r * std::sin(a0),
+                   cx + r * std::cos(a1), cy + r * std::sin(a1)});
+  }
+  return out;
+}
+
 /// A full 360-degree scan of a closed room, in angular order.
 ///
 /// It has to be closed and it has to be 360 degrees. A fan that stops at
@@ -444,6 +462,91 @@ TEST(Tracker, AWallSeenThroughADoorwayIsNotAnObject)
     << "so if this test passes it passes for some other reason";
 }
 
+TEST(Tracker, AFlatPanelIsNotAnObject)
+{
+  // The case neither of the other two structure rules can reach.
+  //
+  // It is 0.60 m wide, so the extent limit (1.00 m) does not fire. It stands
+  // in the open with the far wall behind it, so both its angular neighbours
+  // are FURTHER away and the aperture rule does not fire either. It is a
+  // flat surface all the same, and as the robot drives past, the part of it
+  // the LiDAR can see slides along it -- which is how a stationary building
+  // acquires a velocity.
+  //
+  // Only shape separates this from an obstacle, and shape is exactly what
+  // the first two rules do not look at.
+  std::vector<Segment> world = {
+    {-0.3, 2.0, 0.3, 2.0},                            // the panel, 0.60 m
+    {-4.0, 4.0, 4.0, 4.0},                            // background, further
+    {-4.0, -2.0, 4.0, -2.0},
+    {-4.0, -2.0, -4.0, 4.0}, {4.0, -2.0, 4.0, 4.0},
+  };
+
+  ObstacleTracker tracker{TrackerConfig{}};
+  Pose2D robot(-1.2, 0.0, 0.0);
+  for (int i = 0; i < 14; ++i) {
+    const double t = i * 0.1;
+    robot.x = -1.2 + 0.5 * t;                          // drive past it
+    tracker.update(scanRoom(robot.x, robot.y, world, 720), robot, t);
+  }
+
+  EXPECT_TRUE(tracker.movingInRobotFrame(robot).empty())
+    << "a stationary flat panel was reported as a moving object";
+  EXPECT_GT(tracker.lastRejectedAsFlat(), 0u)
+    << "the panel was not rejected for being flat, so if this test passes "
+    << "it passes for some other reason";
+  EXPECT_EQ(tracker.lastRejectedAsOccluded(), 0u)
+    << "the panel stands in the open; the aperture rule must not claim it";
+}
+
+TEST(Tracker, ACylinderIsNotFlatAtAnyRangeThisRobotCaresAbout)
+{
+  // The complement, and the one that matters for safety: the shape rule
+  // must not discard the obstacle it exists to let through. A 0.20 m
+  // cylinder is what crosses this robot's corridor.
+  for (const double range : {1.5, 3.0, 5.0}) {
+    std::vector<Segment> world = {
+      {-5.0, 8.0, 5.0, 8.0}, {-5.0, -2.0, 5.0, -2.0},
+      {-5.0, -2.0, -5.0, 8.0}, {5.0, -2.0, 5.0, 8.0},
+    };
+    for (const auto & s : circle(0.0, range, 0.20)) {world.push_back(s);}
+
+    ObstacleTracker tracker{TrackerConfig{}};
+    const Pose2D robot(0.0, 0.0, 0.0);
+    tracker.update(scanRoom(robot.x, robot.y, world, 720), robot, 0.0);
+
+    bool found = false;
+    for (const auto & tr : tracker.tracks()) {
+      if (std::hypot(tr.x, tr.y - range) < 0.3) {found = true;}
+    }
+    EXPECT_TRUE(found) << "the cylinder at " << range
+                       << " m was discarded; a collision avoider that stops "
+                       << "believing in obstacles is worse than one with no "
+                       << "filter at all";
+  }
+}
+
+TEST(Tracker, TheShapeRuleAbstainsWhenThereIsNotEnoughToJudge)
+{
+  // Three points are collinear whatever they came from, so below the
+  // minimum the rule must abstain -- and abstaining has to mean KEEPING the
+  // cluster. A shape test that guesses on thin evidence guesses away real
+  // obstacles.
+  TrackerConfig cfg;
+  cfg.min_cluster_points = 3;
+  ObstacleTracker tracker{cfg};
+
+  const std::vector<ScanPoint> sliver = {
+    {0.00, 2.00}, {0.03, 2.00}, {0.06, 2.00},          // dead straight
+  };
+  tracker.update(sliver, Pose2D(0.0, 0.0, 0.0), 0.0);
+
+  EXPECT_EQ(tracker.lastRejectedAsFlat(), 0u)
+    << "the rule judged a three-point cluster, where every cluster is "
+    << "straight and the verdict means nothing";
+  EXPECT_EQ(tracker.tracks().size(), 1u) << "the cluster was dropped anyway";
+}
+
 TEST(Tracker, AnObjectHiddenDownOneSideIsStillAnObject)
 {
   // This is why the rule needs BOTH neighbours to be nearer.
@@ -459,13 +562,15 @@ TEST(Tracker, AnObjectHiddenDownOneSideIsStillAnObject)
   // Geometry: a stub at y = 1 casts a shadow over x in [0.4, 0.6] at y = 2,
   // clipping the left of an object spanning [0.5, 0.9]. The background is
   // the north wall 1 m behind it.
-  const std::vector<Segment> world = {
+  const std::vector<Segment> base = {
     {-3.0, 1.0, -0.6, 1.0}, {0.2, 1.0, 0.3, 1.0},    // south-ish wall + stub
-    {0.5, 2.0, 0.9, 2.0},                             // the object
+    // the object: a cylinder, which is what the world actually contains
     {-3.0, 3.0, 3.0, 3.0},                            // background wall
     {-3.0, -2.0, 3.0, -2.0},                          // south
     {-3.0, -2.0, -3.0, 3.0}, {3.0, -2.0, 3.0, 3.0},   // west, east
   };
+  std::vector<Segment> world = base;
+  for (const auto & s : circle(0.75, 2.0, 0.20)) {world.push_back(s);}
 
   ObstacleTracker tracker{TrackerConfig{}};
   const Pose2D robot(0.0, 0.0, 0.0);
@@ -499,9 +604,13 @@ TEST(Tracker, AnObjectInTheOpenSurvivesTheApertureRule)
     std::vector<ScanPoint> scan;
     // Background wall at y = 4, left half.
     for (double x = -3.0; x < 0.6; x += 0.05) {scan.push_back({x, 4.0});}
-    // A small object at y = 2, drifting sideways at 0.3 m/s.
+    // A small CYLINDER at y = 2, drifting sideways at 0.3 m/s. It has to be
+    // curved: the tracker now tests shape, and a flat strip of points is a
+    // piece of wall by every measure it has.
     const double ox = 0.8 + 0.3 * t;
-    for (double d = -0.15; d <= 0.15; d += 0.05) {scan.push_back({ox + d, 2.0});}
+    for (double a = -1.0; a <= 1.0; a += 0.22) {
+      scan.push_back({ox + 0.20 * std::sin(a), 2.0 - 0.20 * std::cos(a)});
+    }
     // Background wall again, right half.
     for (double x = 1.4; x <= 3.0; x += 0.05) {scan.push_back({x, 4.0});}
     tracker.update(toRobot(scan, robot), robot, t);
@@ -513,6 +622,127 @@ TEST(Tracker, AnObjectInTheOpenSurvivesTheApertureRule)
   const auto moving = tracker.movingInRobotFrame(robot);
   ASSERT_EQ(moving.size(), 1u) << "the real mover was lost";
   EXPECT_NEAR(moving.front().vx, 0.3, 0.08);
+}
+
+/// A compact curved cluster centred on (cx, cy): an object, not a surface.
+std::vector<ScanPoint> pebble(double cx, double cy, double r = 0.12,
+                              int points = 9)
+{
+  std::vector<ScanPoint> out;
+  for (int i = 0; i < points; ++i) {
+    const double a = -1.1 + 2.2 * i / (points - 1);
+    out.push_back({cx + r * std::sin(a), cy - r * std::cos(a)});
+  }
+  return out;
+}
+
+TEST(Tracker, TheNearestPairWinsFirst)
+{
+  // Walking candidates in SCAN ORDER and giving each the nearest track still
+  // free is a different algorithm from matching the closest pair first, and
+  // this geometry is where they disagree.
+  //
+  //   tracks      A at x=0.00            B at x=0.60
+  //   candidates           c1 at x=0.35       c2 at x=0.65
+  //
+  // c1 comes first in scan order. Its nearest free track is B (0.25 away,
+  // against 0.35 for A), so greedy gives it B -- and then c2, which is 0.05
+  // from B and 0.65 from A, has nothing left inside the 0.45 m gate. It
+  // becomes a NEW object, and A is left unmatched to coast.
+  //
+  // Matching the closest pair first takes B-c2 at 0.05, then A-c1 at 0.35.
+  // Two tracks, two candidates, nothing invented. The cost is one sort.
+  ObstacleTracker tracker{TrackerConfig{}};
+  const Pose2D robot(0.0, 0.0, 0.0);
+
+  std::vector<ScanPoint> first;
+  for (const auto & p : pebble(0.00, 2.0, 0.05)) {first.push_back(p);}
+  for (const auto & p : pebble(0.60, 2.0, 0.05)) {first.push_back(p);}
+  tracker.update(first, robot, 0.0);
+  ASSERT_EQ(tracker.tracks().size(), 2u) << "the scene did not start as two";
+
+  const std::size_t born_before = tracker.stats().tracks_created;
+  std::vector<ScanPoint> second;
+  for (const auto & p : pebble(0.35, 2.0, 0.05)) {second.push_back(p);}
+  for (const auto & p : pebble(0.65, 2.0, 0.05)) {second.push_back(p);}
+  tracker.update(second, robot, 0.1);
+
+  EXPECT_EQ(tracker.stats().tracks_created - born_before, 0u)
+    << "a third object was invented: the nearer pair did not win first, so "
+    << "a candidate took the track that fitted the other one better";
+  EXPECT_EQ(tracker.tracks().size(), 2u)
+    << "the world has two objects in it and the tracker should too";
+}
+
+TEST(Tracker, AnAmbiguousAssociationProducesNoVelocity)
+{
+  // When a track has two candidates inside its gate the cluster it was
+  // following came apart, and whichever half wins is not the same physical
+  // thing it was following a moment ago. Differencing those two centroids
+  // measures the regrouping, not any motion.
+  //
+  // The match is still made -- an obstacle that splits must stay tracked --
+  // but no velocity is taken from it, which is the same choice the speed cap
+  // already makes for a different reason.
+  ObstacleTracker tracker{TrackerConfig{}};
+  const Pose2D robot(0.0, 0.0, 0.0);
+
+  // Four cycles of one object holding still, so a track exists and is calm.
+  for (int i = 0; i < 4; ++i) {
+    tracker.update(pebble(0.0, 2.0), robot, i * 0.1);
+  }
+  ASSERT_EQ(tracker.tracks().size(), 1u);
+  const double before = std::hypot(tracker.tracks().front().vx,
+                                   tracker.tracks().front().vy);
+
+  // Now it appears as two clusters, both inside the 0.45 m gate.
+  std::vector<ScanPoint> split;
+  for (const auto & p : pebble(-0.18, 2.0, 0.08)) {split.push_back(p);}
+  for (const auto & p : pebble(0.18, 2.0, 0.08)) {split.push_back(p);}
+  tracker.update(split, robot, 0.4);
+
+  EXPECT_GT(tracker.stats().ambiguous_associations, 0u)
+    << "the split was not recognised as ambiguous";
+  double worst = 0.0;
+  for (const auto & tr : tracker.tracks()) {
+    worst = std::max(worst, std::hypot(tr.vx, tr.vy));
+  }
+  EXPECT_NEAR(worst, before, 1e-9)
+    << "a velocity was manufactured out of a cluster coming apart";
+}
+
+TEST(Tracker, AVelocityNobodyCanConfirmStopsBeingBelieved)
+{
+  // Ambiguous associations produce no velocity, which is right. Leaving the
+  // last one in place is not: a spurious velocity, once acquired, then
+  // outlives every chance to disprove it, holds the track above the moving
+  // threshold, and the planner spends the run dodging it.
+  //
+  // Measured before this rule: one run timed out 15.8 m from its goal and
+  // scored a flawless 6.03 m of obstacle clearance by never going near the
+  // obstacle at all.
+  ObstacleTracker tracker{TrackerConfig{}};
+  const Pose2D robot(0.0, 0.0, 0.0);
+
+  // Six cycles of honest motion, enough to be trusted and to be moving.
+  for (int i = 0; i < 6; ++i) {
+    tracker.update(pebble(0.30 * i * 0.1, 2.0), robot, i * 0.1);
+  }
+  ASSERT_FALSE(tracker.movingInRobotFrame(robot).empty())
+    << "the object was never believed to move, so this test proves nothing";
+
+  // Now it keeps splitting: every association is ambiguous, so no velocity
+  // can be confirmed. The object itself holds still.
+  for (int i = 6; i < 14; ++i) {
+    std::vector<ScanPoint> split;
+    for (const auto & q : pebble(0.135, 2.0, 0.07)) {split.push_back(q);}
+    for (const auto & q : pebble(0.495, 2.0, 0.07)) {split.push_back(q);}
+    tracker.update(split, robot, i * 0.1);
+  }
+
+  EXPECT_TRUE(tracker.movingInRobotFrame(robot).empty())
+    << "a velocity that has gone unconfirmed for 0.8 s is still being "
+    << "reported as motion";
 }
 
 TEST(Tracker, ResetClearsEverything)

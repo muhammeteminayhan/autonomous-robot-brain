@@ -139,10 +139,26 @@ def report(rows: list[dict], out_dir: pathlib.Path) -> None:
                 f"| {r.get('min_obstacle_clearance_m', float('nan')):.3f} "
                 f"| {r.get('tracked_mean') or 0:.1f} / {r.get('tracked_max') or 0} |")
 
+    # Clearance from a run that never travelled is not a safety result: a
+    # robot stuck at the start scores a perfect distance from an obstacle it
+    # never approached. One run timed out 15.8 m from its goal and recorded
+    # 6.03 m of clearance that way, which dragged an arm's mean to +1.39 m
+    # and made a frozen planner look like the safest one measured.
+    stuck = [r for r in rows if not r.get("arrived")
+             and r.get("final_error_m", 0.0) > 2.0]
+    if stuck:
+        lines.append("")
+        lines.append(f"**{len(stuck)} run(s) never travelled** (over 2 m from "
+                     f"the goal at the end). Their clearance measures how far "
+                     f"away they stopped, not how safely they passed, and is "
+                     f"excluded from the means below.")
+    scored = [r for r in rows if r not in stuck]
+
     paired = [(by[(p, False)], by[(p, True)]) for p in phases
-              if (p, False) in by and (p, True) in by]
+              if (p, False) in by and (p, True) in by
+              and by[(p, False)] in scored and by[(p, True)] in scored]
     lines.append("")
-    lines.append(f"**{len(paired)} matched pairs.**")
+    lines.append(f"**{len(paired)} matched pairs** that both travelled.")
     if paired:
         better = sum(1 for b, pr in paired
                      if (pr.get("min_obstacle_clearance_m") or -9)

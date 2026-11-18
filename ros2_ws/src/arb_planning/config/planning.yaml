@@ -175,6 +175,21 @@
       # What distinguishes them is the boundary -- an object in the open is
       # bounded by returns from further away, a doorway by nearer ones.
       aperture_margin_m: 0.10
+      # How much a cluster must bend per metre of its own length before it
+      # counts as an object rather than a piece of flat surface. Extent says
+      # how big a cluster is; this says what shape it is, and shape is what
+      # separates a 0.4 m cylinder from 0.4 m of visible wall.
+      #
+      # A RATIO, not a distance: a short cluster bends less in absolute
+      # terms, so a fixed threshold quietly means "objects must be large",
+      # and a half-occluded obstacle is exactly what must not be dropped.
+      # Measured over 1.5-7 m and down to 40 % visible, the worst cylinder
+      # scores 0.063 and the worst wall 0.020.
+      min_bend_ratio: 0.035
+      # Below this many returns the shape test abstains, because three
+      # points are collinear whatever they came from. Abstaining keeps the
+      # cluster, which is the safe direction for a collision avoider.
+      min_points_for_shape: 5
       association_gate_m: 0.45
       velocity_filter_tau_s: 0.30
       min_tracked_speed_m_s: 0.12
