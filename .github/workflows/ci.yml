@@ -35,6 +35,13 @@ jobs:
           sed -e 's/#.*//' -e '/^[[:space:]]*$/d' docker/apt-packages.txt \
             | xargs apt-get install -y --no-install-recommends
 
+      - name: Let git read the checkout
+        # The container runs steps under a different user than the one
+        # actions/checkout ran as, and checkout's safe.directory entry goes
+        # into THAT user's temporary global config. Without this, every
+        # `git` call in a test dies with "detected dubious ownership".
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Guard against a non-ASCII workspace path
         shell: bash
         run: |

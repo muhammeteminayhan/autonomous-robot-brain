@@ -27,9 +27,18 @@ INSTALL_DIRECTORY = re.compile(
 
 
 def tracked_files() -> set[str]:
-    out = subprocess.run(["git", "ls-files"], cwd=REPO_ROOT,
-                         capture_output=True, text=True, check=True).stdout
-    return set(out.split())
+    r = subprocess.run(["git", "ls-files"], cwd=REPO_ROOT,
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        # Do NOT skip. This test's whole value is in CI, on a fresh clone --
+        # skipping exactly there would leave the guard permanently vacuous
+        # while still showing green.
+        raise AssertionError(
+            f"`git ls-files` failed in {REPO_ROOT} (exit {r.returncode}): "
+            f"{r.stderr.strip()}\n"
+            "If this says 'dubious ownership', the job needs "
+            "`git config --global --add safe.directory` for the checkout.")
+    return set(r.stdout.split())
 
 
 def cmake_files() -> list[Path]:
