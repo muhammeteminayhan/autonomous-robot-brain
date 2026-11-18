@@ -310,6 +310,58 @@ cluster bounded by further-away returns — an object by every test the tracker
 can apply, and an artefact of the fan rather than of the world. The test was
 failing for a reason that did not exist outside the test.
 
+#### Three rules, and the thing they uncovered
+
+Extent and the aperture rule still left the tracker reporting 1.76 movers in
+a world containing one. Fixing that started with **counting what the tracker
+did** rather than guessing: births, matches, deaths, splits, merges, speed
+rejections, and how long dead tracks lived.
+
+The census disproved the obvious hypothesis immediately. The phantoms were
+not short-lived noise — dead tracks had lived 36 cycles on average and 34 of
+42 had been *trusted*. Merges outnumbered splits two to one. Their extents
+sat either side of the real obstacle's 0.40 m, which said the discriminator
+was not size.
+
+| rule | what it uses | why extent cannot |
+|---|---|---|
+| **shape** | deviation from a fitted line, per unit length | a wall is locally straight at *any* width |
+| **association** | globally nearest pair first, not scan order | scan order is where the laser started |
+| **staleness** | a velocity unconfirmed for 0.4 s is not motion | a spurious velocity otherwise never dies |
+
+The shape test is one 2×2 covariance: the smaller principal component of a
+cluster *is* its deviation from the best-fit line, so there is no line to
+fit. It is a **ratio**, not a distance — a fixed distance quietly means
+"objects must be large", and the first version at 0.025 m discarded a
+half-occluded obstacle scoring 0.0238, which is the dangerous direction to be
+wrong in.
+
+Measured over the same six crossing phases, before and after:
+
+| | aperture only | all three rules |
+|---|---|---|
+| mean movers reported (**one** exists) | 1.76 | **0.99** |
+| peak | 7 | **4** |
+| cycles reporting more than two | 30 % | **4 %** |
+| reached the goal | 7 / 12 | 7 / 12 |
+| **passed without contact** | **8 / 9** | **5 / 9** |
+
+#### The phantoms had been an accidental safety margin
+
+The tracker is now honest and the robot hits things *more often*. That is not
+a contradiction, and it is the most useful thing this phase produced.
+
+A planner dodging obstacles that are not there is a cautious planner. It
+slows down, it swings wide, and it misses the real obstacle as a side effect
+of missing everything. Take the phantoms away and it drives the route it was
+always asked to drive — straight into the crossing obstacle that Phase 11
+measured it colliding with in 3 of 3 runs. **That defect was never fixed,
+only masked**, and the mask is what removing it exposed.
+
+Nine travelled runs cannot separate 5/9 from 8/9 with any confidence, so this
+is recorded as suggestive. The direction, though, is the point: a sensor-side
+fix made the system worse by removing an accident it had come to depend on.
+
 #### Evasion before surrender
 
 Rejecting every forward command and then stopping reproduces the original

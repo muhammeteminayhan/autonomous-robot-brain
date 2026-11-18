@@ -18,7 +18,7 @@ so while its sensors are deliberately degraded and failed.
 > the plan: **16.8 m from the west corridor through a 1.5 m doorway into Room E
 > in 36.5 s, collision-free, arriving 0.30 m from the goal.** Two controllers —
 > a DWA local planner and a pure-pursuit/PID follower — are measured against
-> each other on an identical course. 358 unit tests and 156 integration tests
+> each other on an identical course. 364 unit tests and 156 integration tests
 > pass. Six fault scenarios measure what the estimator does when its sensors
 > degrade: the EKF beats dead reckoning by 1.6-2.8x throughout, and a ramped
 > one-wheel encoder bias defeats it outright — the map is built at the estimate
@@ -916,7 +916,7 @@ to work until it has been executed.
 |---|---|---|
 | Environment (ROS 2 Jazzy, Gazebo Sim 8.15.0, g++ 13.3, CMake 3.28, Eigen 3.4) | ✅ verified | `./scripts/check_environment.sh` → *Environment OK* |
 | `colcon build` | ✅ verified | 11/11 packages, zero stderr |
-| Unit tests (`colcon test`) | ✅ verified | **358 tests, 0 failures** |
+| Unit tests (`colcon test`) | ✅ verified | **364 tests, 0 failures** |
 | Integration tests (`pytest tests/integration`) | ✅ verified | **156 passed, 0 skipped** — with the environment sourced *and* the stack running. Without `source scripts/env.sh`, 11 skip for want of `rclpy`; with it but no stack running, 1 skips, and it is the ground-truth isolation check against the live node graph — the most important test in the suite. A green run that skipped its hardest test looks exactly like one that passed it |
 | Unit tests are not vacuous | ✅ verified | **64 code mutations** injected across six packages; all caught (12 escaped first and the tests were strengthened; 1 was an equivalent mutant and was removed). The most recent escape weakened the aperture rule's `&&` to `||` and nothing failed — half the rule was untested until a case for it was written |
 | Guard tests actually bite | ✅ verified | 8 probes against the isolation, config-consistency and docs-consistency guards; every one fails the guard it targets and passes once reverted |
@@ -969,7 +969,7 @@ to work until it has been executed.
 | A launch argument a script passes is actually declared | ✅ verified | `test_launch_arguments.py`; caught the real defect — the benchmark's baseline arm passed `predict_obstacle_motion:=false` to a launch file that discarded it, so both arms predicted |
 | A run uses the configuration it claims | ✅ verified | the harness asks the node for the parameter after startup and refuses to run on a mismatch; the metrics used to record intent, not fact |
 | One run's simulator cannot leak into the next | ✅ verified | `gz sim` is a grandchild of `ros2 launch` and survives teardown; the harness now refuses to start beside a stray and kills what teardown leaves |
-| Phantom obstacle tracks | ⚠️ reduced, not eliminated | walls seen through doorways: a cluster under the extent limit whose window slides as the robot moves. Rejected when both angular neighbours are nearer. Unit-tested and mutation-tested (both mutations caught). Measured live: mean movers 2.37 → 1.66, reached goal 5/12 → 7/12, no contact 6/12 → 8/12. **1.66 in a world with one object means sources remain** |
+| Phantom obstacle tracks | ✅ fixed | three rules — shape (a wall is locally straight, a cylinder cannot be), globally-nearest association, and velocities that expire when unconfirmed. Over the same six crossing phases: mean movers **1.76 → 0.99** in a world containing one, peak 7 → 4, cycles reporting more than two 30 % → 4 % |
 | Collision verdict is not taken from the LiDAR alone | ✅ verified | the scan is blind inside `range_min`, where collisions are; the geometric test from ground truth caught 3 collisions the scan-based one scored as clean |
 | Moving obstacle is visible to the LiDAR | ✅ verified | spawns, sweeps its segment, and 50/99 samples return a beam at its range — not an invisible `<actor>` |
 
@@ -978,13 +978,22 @@ to work until it has been executed.
 
 ## Limitations
 
-- **Open defect: the obstacle tracker invents obstacles.** In a world
-  containing exactly one moving object it reports a mean of 1.7, and before
-  the aperture rule it peaked at 9. That rate predicts whether a run reaches
-  its goal (r = −0.73) better than any planner setting does, so
-  `predict_obstacle_motion` ships **off** and the local planner treats every
-  obstacle as stationary — the Phase 11 behaviour, collisions included. The
-  feature, its 34 tests and the measurements are kept rather than deleted;
+- **The local planner still walks into a crossing obstacle, and fixing the
+  tracker made that worse rather than better.** With the phantom tracks gone
+  the robot passed cleanly in 5 of 9 travelled runs, against 8 of 9 while the
+  tracker was still inventing obstacles. The phantoms had been an accidental
+  safety margin: a planner dodging things that are not there also misses the
+  thing that is. The Phase 11 defect — DWA plans against a still photograph —
+  was never fixed, only masked, and removing the mask is what exposed it.
+  Nine runs cannot separate 5/9 from 8/9 with confidence, so this is recorded
+  as suggestive rather than established.
+- **Resolved: the tracker used to invent obstacles.** It reported a mean of
+  1.7 movers in a world containing one, peaking at 9, and that rate predicted
+  whether a run reached its goal (r = −0.73) better than any planner setting
+  did. Three rules brought it to 0.99. `predict_obstacle_motion` still ships
+  **off**: across 12 matched encounters before the fix and 4 after, predicting
+  obstacle motion has never been ahead in aggregate, and now that the tracker
+  is honest the remaining collisions are the planner's.
   [docs/benchmarks.md § 5b](docs/benchmarks.md) has the numbers and
   [docs/control.md](docs/control.md) has the diagnosis.
 - Localisation is 2D (SE(2)). Slopes, ramps and non-planar motion are out of scope.

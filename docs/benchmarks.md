@@ -569,6 +569,75 @@ default configuration, and saying so is cheaper than discovering it later.
 
 ---
 
+## 5c. Fixing the tracker, and what that uncovered
+
+§ 5b left the tracker reporting 1.76 moving obstacles in a world containing
+one. Three rules brought that to 0.99. The method was the point: **count
+before changing anything.**
+
+The tracker now records births, matches, deaths, splits, merges, speed
+rejections and how long dead tracks lived. That census disproved the
+hypothesis it was built to test — the phantoms were not short-lived noise.
+Dead tracks had lived 36 cycles on average and 34 of 42 had been *trusted*.
+Merges outnumbered splits two to one. Their extents sat either side of the
+real obstacle's 0.40 m, which ruled out size as the discriminator and
+pointed at shape.
+
+| rule | discriminator |
+|---|---|
+| **shape** | deviation from a fitted line per unit length — a wall is locally straight at any width, a cylinder cannot be |
+| **association** | globally nearest pair first; ambiguous pairings associate but yield no velocity |
+| **staleness** | a velocity unconfirmed for 0.4 s stops counting as motion |
+
+Each was measured on its own, four runs apiece:
+
+| rule set | movers | peak | tracks created | merges |
+|---|---|---|---|---|
+| aperture only | 2.21 | 9 | 375 | 2387 |
+| + shape | 1.72 | 6 | 114 | 814 |
+| + association | 1.92 | 5 | 96 | 415 |
+| + staleness | **0.68** | **2** | **37** | **149** |
+
+Association alone **raised** the headline number while improving every
+structural counter, which is how the next bug was found: better matching
+keeps tracks alive longer, and freezing the velocity of an ambiguous track
+meant a spurious velocity, once acquired, outlived every chance to disprove
+it.
+
+### The result over the full sweep
+
+Twelve runs, the same six crossing phases as § 5b:
+
+| | aperture only | all three rules |
+|---|---|---|
+| mean movers (**one** exists) | 1.76 | **0.99** |
+| peak | 7 | **4** |
+| cycles reporting more than two | 30 % | **4 %** |
+| reached the goal | 7 / 12 | 7 / 12 |
+| **passed without contact** | **8 / 9** | **5 / 9** |
+| mean clearance, travelled runs | +0.149 m | +0.055 m |
+
+The tracker is now honest, and the robot hits things more often.
+
+That is not a contradiction. A planner dodging obstacles that are not there
+is a cautious planner: it slows, it swings wide, and it misses the real
+obstacle as a side effect of missing everything. Remove the phantoms and it
+drives the route it was always asked to drive — into the crossing obstacle
+§ 5 measured it colliding with in 3 of 3 runs. **The phantoms had been an
+accidental safety margin, and the Phase 11 defect was never fixed, only
+masked.**
+
+Nine travelled runs cannot separate 5/9 from 8/9 with confidence, so the
+magnitude is suggestive rather than established. The direction is the
+finding: a correct component made the system worse, because the system had
+come to depend on the incorrect one.
+
+`predict_obstacle_motion` therefore stays **off**. Prediction has not been
+ahead in aggregate in any sweep, and with the tracker telling the truth the
+remaining collisions belong to the planner, not its input.
+
+---
+
 ## 6. What these sweeps cannot tell you
 
 * **Three seeds.** Enough to see whether an effect exceeds the scatter, not

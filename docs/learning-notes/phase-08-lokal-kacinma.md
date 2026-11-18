@@ -241,6 +241,74 @@ geçti**. Yani kuralın yarısı test edilmiyormuş.
 > + gerçek ışın izleyici + tam 360°. Sentetik tarama üretirken dünyanın
 > değil, taramanın sınırlarını ölçme riski her zaman vardır.
 
+### Hayaletleri kapatmak: önce SAY, sonra düzelt
+
+Aralık kuralından sonra izleyici hâlâ tek nesnelik dünyada **1.76** hareketli
+raporluyordu. Dört şüphelim vardı ve dördünü birden uygulamak isteyebilirdim.
+Yapmadım — önce **sayıma** geçtim: doğan, eşleşen, ölen iz; bölünme, birleşme,
+hız reddi; ölenlerin yaşı ve güvenilir olup olmadığı.
+
+Sayım dört şüphelimi de eledi:
+
+```
+ölen izler: ortalama 36 ÇEVRIM yaşamış (3.6 saniye)
+            42'sinin 34'ü GÜVENILIR statüsündeymiş
+birleşme (140) > bölünme (67)
+hız reddi: sadece 4
+```
+
+Yani hayaletler ne genç ne gürültülü; izleyicinin saniyelerce inandığı
+kalıcı şeyler. Genişlikleri de gerçek engelin 0.40 m'sinin **iki yanına**
+toplanmış. Demek ki ayırt edici boyut değil, **şekil**.
+
+**Kural 1 — şekil.** Duvar her genişlikte yerel olarak düzdür; silindir
+olamaz. Kümenin en küçük temel bileşeni zaten onun en iyi doğruya olan
+sapmasıdır, yani doğru uydurmaya gerek yok: tek bir 2×2 kovaryans yetiyor.
+
+> **Ve bu bir ORAN olmalı, mesafe değil.** İlk hâlini 0.025 m mutlak eşikle
+> yazdım; yarı örtülü silindir 0.0238 ile kıl payı eleniyordu. Kısa küme daha
+> az bükülür, dolayısıyla sabit mesafe eşiği sessizce "nesneler büyük olmalı"
+> demek oluyor — ve yarı örtülü engeli atmak, yanılmanın tehlikeli yönü.
+> Sapma/uzunluk oranıyla: en kötü silindir 0.063, en kötü duvar 0.020.
+
+**Kural 2 — eşleştirme.** Adayları tarama sırasında gezmek yerine **global
+olarak en yakın çiftten** başla. Tarama sırası, lazerin nereden başladığının
+tesadüfüdür. Ayrıca belirsiz eşleşmeden (bir izin kapısında iki aday, ya da
+tersi) **hız alma** — kazanan çift aynı fiziksel nesnenin iki anı değildir.
+
+**Kural 3 — yaşlanma.** Hızı dondurmak yanlıştı. Bir kez oluşan sahte hız,
+kendini çürütecek her fırsatı atlatıp izi sonsuza dek "hareketli" tutuyordu.
+Kanıt yokluğu, eski kanıtın geçerliliği değildir: 0.4 s doğrulanamayan hız
+artık hareket sayılmıyor.
+
+Aynı altı fazda ölçülen:
+
+| | sadece aralık | üç kural |
+|---|---|---|
+| ortalama hareketli (**bir** tane var) | 1.76 | **0.99** |
+| en yüksek | 7 | **4** |
+| ikiden fazla gören çevrim | %30 | **%4** |
+| **çarpmadan geçti** | **8/9** | **5/9** |
+
+### Hayaletler kazara güvenlik payıymış
+
+İzleyici dürüstleşti ve robot **daha çok** çarpıyor. Çelişki değil, ve bu
+fazın ürettiği en değerli şey bu.
+
+Olmayan engellerden kaçınan bir planlayıcı, temkinli bir planlayıcıdır:
+yavaşlar, geniş alır, ve her şeyi ıskaladığı için gerçek engeli de ıskalar.
+Hayaletleri alınca kendisinden istenen rotayı sürüyor — doğruca, Faz 11'in
+"3/3 çarpıyor" diye ölçtüğü geçen engelin içine. **O kusur hiç
+çözülmemişti, sadece maskelenmişti.**
+
+> **Mülakatta anlatılacak hâli:** "Sensör tarafındaki bir hatayı düzelttim ve
+> sistem kötüleşti, çünkü planlayıcı o hatanın kazara sağladığı paya bağımlı
+> hale gelmişti." Bir bileşeni tek başına doğru yapmak, sistemi doğru
+> yapmaya yetmez — ve bunu ancak **uçtan uca ölçersen** görürsün.
+
+Dokuz koşum 5/9 ile 8/9'u güvenle ayıramaz, o yüzden bu "düşündürücü" olarak
+kaydedildi, "kanıtlanmış" olarak değil.
+
 > **Mülakat sorusu olarak:** "`map` ve `odom` arasındaki fark nedir?" sorusuna
 > herkes "biri global, biri lokal" der. Asıl cevap: **`odom` pürüzsüz ama
 > kayar, `map` doğru ama sıçrar** — ve hangisini seçeceğin, doğruluk mu
