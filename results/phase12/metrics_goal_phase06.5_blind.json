@@ -1,0 +1,32 @@
+{
+  "goal": "goal_far_east",
+  "goal_xy": [
+    8.5,
+    0.0
+  ],
+  "start_xy": [
+    -8.499999999999448,
+    1.9414976730019858e-19
+  ],
+  "arrived": false,
+  "goal_tolerance_m": 0.3,
+  "stopped_itself_short": true,
+  "time_s": 102.87921047210693,
+  "distance_m": 19.059420884895605,
+  "straight_line_m": 16.999999999999446,
+  "path_efficiency": 0.8919473525804643,
+  "final_error_m": 4.365833793872703,
+  "final_estimate_error_m": 4.280037164221047,
+  "min_lidar_range_m": 0.12000679224729538,
+  "blind_spot_samples": 142,
+  "min_obstacle_clearance_m": -0.08912417361011388,
+  "touched_obstacle": true,
+  "collision_free": true,
+  "mean_speed_m_s": 0.1828394318880618,
+  "phase_offset_s": 6.5,
+  "predict": false,
+  "seed": 1,
+  "tracked_mean": 3.1818181818181817,
+  "tracked_max": 7,
+  "track_speed_median": 0.44
+}

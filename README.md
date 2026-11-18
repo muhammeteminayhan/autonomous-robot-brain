@@ -18,7 +18,7 @@ so while its sensors are deliberately degraded and failed.
 > the plan: **16.8 m from the west corridor through a 1.5 m doorway into Room E
 > in 36.5 s, collision-free, arriving 0.30 m from the goal.** Two controllers —
 > a DWA local planner and a pure-pursuit/PID follower — are measured against
-> each other on an identical course. 332 unit tests and 133 integration tests
+> each other on an identical course. 358 unit tests and 155 integration tests
 > pass. Six fault scenarios measure what the estimator does when its sensors
 > degrade: the EKF beats dead reckoning by 1.6-2.8x throughout, and a ramped
 > one-wheel encoder bias defeats it outright — the map is built at the estimate
@@ -27,13 +27,17 @@ so while its sensors are deliberately degraded and failed.
 > between **0.04 and 0.05 rad/s**, a **40x** change in gyro noise costs only
 > **1.7x** in error, **11 of 360** LiDAR beams are enough to localise — and the
 > local planner **collides with a crossing obstacle in 3 of 3 runs**, because
-> DWA has no model of obstacle velocity. An obstacle tracker was added to fix
-> that and **has not yet earned its place**: it reports phantom movers —
-> peaking at 9 in a world containing one — and the comparison meant to
-> justify it turned out to be measuring nothing, because the baseline arm
-> had been silently configured identically to the treatment arm. Both are
-> written up rather than quietly dropped. See
-> [Verification status](#verification-status) for exactly what has been run.
+> DWA has no model of obstacle velocity. An obstacle tracker was built to fix
+> that, and over 12 matched encounters it **has not earned its place**: it
+> still reports a mean of 1.7 moving obstacles in a world containing one, and
+> that phantom rate predicts whether a run reaches its goal (r = −0.73)
+> better than the planner setting under test does (r = −0.17). Prediction is
+> therefore **off by default**, with the feature, its tests and the reasons
+> kept. Getting that far first meant finding three ways the experiment had
+> been lying — including a `name:=value` that `ros2 launch` silently
+> discarded, which had made the control arm identical to the treatment arm.
+> See [Verification status](#verification-status) for exactly what has been
+> run.
 
 ![The robot's own map, the A* plan and the EKF pose, in RViz](docs/images/rviz_navigation.png)
 
@@ -904,6 +908,11 @@ to work until it has been executed.
 | Scan matching survives extreme beam loss | ✅ measured | no degradation at **97 %** dropout (11 of 360 beams); fault confirmed applied (139,546 beams dropped) |
 | Filter survives losing its only absolute reference | ✅ measured | 30 s LiDAR outage costs ~2 mm; outage confirmed by counting scan matches (0 in 20 s vs 23 after) |
 | Local planner vs a crossing obstacle | ✅ measured | **collides in 3/3 runs** — DWA has no obstacle-velocity model and first brakes at 0.027 m of clearance while needing 0.096 m to stop |
+| Does predicting obstacle motion help? | ✅ measured, answer is no | 12 matched encounters with the crossing phase swept: stationary-assumption 4/6 arrived at +0.149 m, prediction 3/6 at −0.035 m. Never ahead in aggregate, so it ships off. Six pairs per arm cannot separate the gap from the spread — the honest claim is *no evidence it helps*, not *it is worse* |
+| A launch argument a script passes is actually declared | ✅ verified | `test_launch_arguments.py`; caught the real defect — the benchmark's baseline arm passed `predict_obstacle_motion:=false` to a launch file that discarded it, so both arms predicted |
+| A run uses the configuration it claims | ✅ verified | the harness asks the node for the parameter after startup and refuses to run on a mismatch; the metrics used to record intent, not fact |
+| One run's simulator cannot leak into the next | ✅ verified | `gz sim` is a grandchild of `ros2 launch` and survives teardown; the harness now refuses to start beside a stray and kills what teardown leaves |
+| Phantom obstacle tracks | ⚠️ reduced, not eliminated | walls seen through doorways: a cluster under the extent limit whose window slides as the robot moves. Rejected when both angular neighbours are nearer. Unit-tested and mutation-tested (both mutations caught). Measured live: mean movers 2.37 → 1.66, reached goal 5/12 → 7/12, no contact 6/12 → 8/12. **1.66 in a world with one object means sources remain** |
 | Collision verdict is not taken from the LiDAR alone | ✅ verified | the scan is blind inside `range_min`, where collisions are; the geometric test from ground truth caught 3 collisions the scan-based one scored as clean |
 | Moving obstacle is visible to the LiDAR | ✅ verified | spawns, sweeps its segment, and 50/99 samples return a beam at its range — not an invisible `<actor>` |
 

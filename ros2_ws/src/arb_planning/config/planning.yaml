@@ -135,7 +135,23 @@
     # rollout, instead of treating the world as a still photograph. False
     # reproduces the Phase 11 behaviour exactly, which is how the two are
     # compared: same binary, one parameter, same course, same seeds.
-    predict_obstacle_motion: true
+    # OFF by default, because it has not earned its place yet.
+    #
+    # Measured over two paired sweeps, 12 matched encounters in all, with the
+    # obstacle's crossing phase swept rather than left to chance: prediction
+    # arrived 3 of 6 against 4 of 6, and averaged -0.035 m of clearance
+    # against +0.149 m. It has never been ahead in aggregate.
+    #
+    # The reason is upstream. The tracker still reports a mean of 1.7 moving
+    # obstacles in a world containing one, and the phantom rate predicts
+    # whether a run reaches its goal better than this setting does. A planner
+    # that dodges obstacles which are not there is worse than one that treats
+    # them all as stationary -- the stationary assumption is at least wrong
+    # in a way the admissible-velocity rule already handles.
+    #
+    # Turn it back on when the phantom rate approaches 1.0. The feature and
+    # its 34 tests stay; what is switched off is trusting it in the field.
+    predict_obstacle_motion: false
 
     # Static and moving obstacles get different admissibility rules.
     # "Can I stop before it" is the right question for something that holds

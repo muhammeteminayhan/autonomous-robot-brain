@@ -452,8 +452,8 @@ still**, and that assumption is what fails.
 
 The real fix is not a tuning change. It is velocity obstacles (or RVO), or a
 costmap layer that inflates along an obstacle's *predicted* motion — both of
-which require estimating obstacle velocity, which this stack does not do at
-all: the scan is a set of points with no correspondence between frames.
+which require estimating obstacle velocity. That was built next, and §5b is
+what happened when it was measured.
 
 ### The experiment also has a flaw, and it is worth stating
 
@@ -466,6 +466,106 @@ option.
 The mechanism above is unaffected: DWA reacted at 0.027 m because it had no
 velocity model, and it would have done the same on a single traverse. But
 "0 / 3 arrived" is partly a property of the course, not only of the planner.
+
+---
+
+## 5b. Measuring the fix, and three ways an experiment can lie
+
+An obstacle tracker and a prediction rule were added to fix §5. Asking
+whether they worked took four attempts, and the first three measured
+nothing. None of them failed — that is the point of this section.
+
+### The baseline was not a baseline
+
+The sweep built its control arm like this:
+
+```bash
+ros2 launch arb_planning planning.launch.py predict_obstacle_motion:=false
+```
+
+The launch file never declared that argument. **ros2 launch accepts an
+undeclared `name:=value`, discards it, and exits zero.** No warning. The run
+proceeds on the YAML default and is indistinguishable from a configured one.
+Every "no prediction" run predicted, and the two arms were one configuration
+sampled twice.
+
+Verified by asking the node rather than reading the file: launched with
+`:=false`, `ros2 param get /local_planner predict_obstacle_motion` answers
+**True**.
+
+The accident was worth something. Two arms differing in *nothing* gave
+110 ± 36 s and 140 ± 56 s — so a difference of that size is not a difference.
+Against the pre-tracker baseline of 50.4 ± 1.0 s on the same course, it also
+says that adding the tracker made the robot slower **and far less
+predictable**.
+
+### Nothing controlled the encounter
+
+The obstacle's phase was anchored to the instant its spawn call returned,
+which waits on `/clock`, on Gazebo, and on a service round trip. The comment
+above it claimed the motion "repeats identically in every run". It did not.
+
+Whether the robot *meets* the obstacle depends entirely on that phase. The
+same seed and the same binary produced a clean 39.6 s arrival and a 180 s
+timeout with 0.39 m of overlap. The phase is now anchored to the simulation
+clock and exposed as `phase_offset_s`, so the encounter is swept across one
+full period and the arms are compared **in matched pairs** — which is what
+makes a dozen runs enough.
+
+### One run's simulator survived into the next
+
+`ros2 launch` starts a ruby wrapper which starts `gz sim`. Teardown signals
+the wrapper; the wrapper dies and logs it; the grandchild can live on, and
+then shares a world and a transport with the next run while neither log says
+so. One orphan was caught by hand. **The sweep before it therefore cannot be
+proven clean**, and its numbers are reported with that caveat rather than
+dropped. The harness now refuses to start beside a stray and reports what
+teardown leaves behind.
+
+### What the measurement says
+
+Twelve matched encounters per sweep, phase swept across one full period.
+
+| | tracker as built | with the aperture rule |
+|---|---|---|
+| mean movers reported (**one** exists) | 2.37 | **1.66** |
+| runs reporting more than 2 | 7 / 12 | **3 / 12** |
+| reached the goal | 5 / 12 | **7 / 12** |
+| no contact | 6 / 12 | **8 / 12** |
+| mean clearance | +0.009 m | **+0.057 m** |
+
+The aperture rule (§ *Extent cannot tell a small object from a small piece
+of a big one*, [control.md](control.md)) is a real improvement and **not a
+cure**: 1.66 phantoms in a world with one object means sources remain.
+
+On the question the experiment was built to answer:
+
+| | reached goal | mean clearance |
+|---|---|---|
+| treat obstacles as stationary | **4 / 6** | **+0.149 m** |
+| predict obstacle motion | 3 / 6 | −0.035 m |
+
+Prediction has **never been ahead in aggregate**, in either sweep. With six
+pairs per arm the gap is not separable from the spread, so the honest
+statement is not "prediction is worse" but **"there is no evidence it
+helps, and some that it hurts."**
+
+The cause is upstream, and the correlations say so plainly:
+
+| predictor of reaching the goal | before the rule | after |
+|---|---|---|
+| phantom rate | r = **−0.73** | r = −0.48 |
+| the prediction setting under test | r = −0.17 | r = −0.17 |
+
+Whether the planner predicts matters less than whether the tracker is
+telling it the truth. So `predict_obstacle_motion` now defaults to **false**.
+The feature and its 34 tests stay; what is switched off is trusting it in
+the field, until the phantom rate approaches 1.0.
+
+That is the useful shape of this result. The work was not wasted — it built
+the tracker, the aperture rule, a paired experiment and three guards against
+experiments that lie. What it did not do is earn the feature a place in the
+default configuration, and saying so is cheaper than discovering it later.
 
 ---
 

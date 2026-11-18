@@ -50,12 +50,12 @@ def generate_launch_description() -> LaunchDescription:
                         "topic is a robot that does neither thing.",
         ),
         DeclareLaunchArgument(
-            "predict_obstacle_motion", default_value="true",
+            "predict_obstacle_motion", default_value="false",
             description="Advance tracked obstacles along their measured "
-                        "velocity when scoring a rollout. False reproduces "
-                        "the Phase 11 planner, which treats every obstacle "
-                        "as stationary -- the baseline the prediction is "
-                        "measured against.",
+                        "velocity when scoring a rollout. Off by default: "
+                        "over 12 matched encounters it has never been ahead "
+                        "in aggregate, because the tracker still invents "
+                        "obstacles. See planning.yaml for the numbers.",
         ),
         DeclareLaunchArgument(
             "log_tracks", default_value="false",
