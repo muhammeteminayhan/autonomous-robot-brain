@@ -18,7 +18,7 @@ so while its sensors are deliberately degraded and failed.
 > the plan: **16.8 m from the west corridor through a 1.5 m doorway into Room E
 > in 36.5 s, collision-free, arriving 0.30 m from the goal.** Two controllers —
 > a DWA local planner and a pure-pursuit/PID follower — are measured against
-> each other on an identical course. 358 unit tests and 155 integration tests
+> each other on an identical course. 358 unit tests and 156 integration tests
 > pass. Six fault scenarios measure what the estimator does when its sensors
 > degrade: the EKF beats dead reckoning by 1.6-2.8x throughout, and a ramped
 > one-wheel encoder bias defeats it outright — the map is built at the estimate
@@ -46,6 +46,34 @@ dark = occupied, olive = never observed), the live LiDAR return in red, the A\*
 plan in cyan, and the EKF pose with its covariance ellipse. Nothing here was
 given to it — the map is the robot's own work, and the plan is routed through
 it.*
+
+---
+
+## Contents
+
+This file is long because it is the tour. Three shorter paths through it:
+
+* **Just want to run it?** [Installation](#installation) → [Build and test](#build-and-test) → [Usage](#usage).
+* **Want to know whether it works?** [Verification status](#verification-status) — every claim with the evidence behind it — then [Limitations](#limitations).
+* **Want the reasoning?** [`docs/`](docs/) holds the derivations; [docs/project-report.md](docs/project-report.md) is the one to read first.
+
+| | |
+|---|---|
+| [Problem statement](#problem-statement) | The narrow question this answers |
+| [Architecture](#architecture) | Packages, frames, topic contract |
+| [Installation](#installation) | Ubuntu 24.04 + ROS 2 Jazzy + Gazebo Harmonic |
+| [Known environment pitfalls](#known-environment-pitfalls) | Non-ASCII paths, `set -u` and ROS |
+| [Build and test](#build-and-test) | Three commands |
+| [Usage](#usage) | Running the stack, stage by stage |
+| [What each subsystem does](#what-each-subsystem-does-and-what-it-measured) | The tour, with what each one measured |
+| [Configuration](#configuration) | Where the numbers live |
+| [Fault-injection scenarios](#fault-injection-scenarios) | The six cases |
+| [Results](#results) | Where the data is, and the two analysis documents |
+| [Verification status](#verification-status) | Written vs verified, claim by claim |
+| [Limitations](#limitations) | Including the one open defect |
+| [Future improvements](#future-improvements) | Ordered by how much each would move a measured number |
+| [Project report](#project-report) | The document for explaining this to someone |
+| [Learning notes](#learning-notes) | One per phase, in Turkish, written during |
 
 ---
 
@@ -840,6 +868,16 @@ one directory per phase, alongside the raw metrics it was derived from.
 | `results/phase9/` | Path following and end-to-end navigation, PID vs DWA |
 | `results/phase10/` | Six fault scenarios, per-case error traces and `summary.md` |
 | `results/phase11/` | Parameter sweeps repeated over seeds, and `raw/` per-run metrics |
+| `results/phase12/` | Obstacle-prediction experiment: two paired sweeps, 12 matched encounters each |
+
+Two documents carry the analysis rather than the files:
+
+* **[docs/benchmarks.md](docs/benchmarks.md)** — the five sweeps and what each
+  boundary turned out to be, plus § 5b on the obstacle-prediction experiment
+  and the three ways it was measuring nothing before it measured anything.
+* **[docs/state-estimation.md](docs/state-estimation.md)** — the six-state EKF:
+  why those states, the Joseph-form update, chi-square gating, and where the
+  filter is measurably overconfident.
 
 The `raw/` metrics are the record; every table and plot is derived from them
 and can be re-derived without re-running the simulator:
@@ -859,9 +897,9 @@ to work until it has been executed.
 |---|---|---|
 | Environment (ROS 2 Jazzy, Gazebo Sim 8.15.0, g++ 13.3, CMake 3.28, Eigen 3.4) | ✅ verified | `./scripts/check_environment.sh` → *Environment OK* |
 | `colcon build` | ✅ verified | 11/11 packages, zero stderr |
-| Unit tests (`colcon test`) | ✅ verified | **332 tests, 0 failures** |
-| Integration tests (`pytest tests/integration`) | ✅ verified | **133 passed, 1 skipped** |
-| Unit tests are not vacuous | ✅ verified | **60 code mutations** injected across six packages; all caught (11 escaped first and the tests were strengthened; 1 was an equivalent mutant and was removed) |
+| Unit tests (`colcon test`) | ✅ verified | **358 tests, 0 failures** |
+| Integration tests (`pytest tests/integration`) | ✅ verified | **156 passed, 0 skipped.** Run without `source scripts/env.sh` first, 11 of them skip: the live-graph checks cannot find a graph. A green run that skipped its hardest tests looks identical to one that passed them |
+| Unit tests are not vacuous | ✅ verified | **64 code mutations** injected across six packages; all caught (12 escaped first and the tests were strengthened; 1 was an equivalent mutant and was removed). The most recent escape weakened the aperture rule's `&&` to `||` and nothing failed — half the rule was untested until a case for it was written |
 | Guard tests actually bite | ✅ verified | 8 probes against the isolation, config-consistency and docs-consistency guards; every one fails the guard it targets and passes once reverted |
 | Planner benchmark | ✅ measured | [results/phase7/planner_benchmark.csv](results/phase7/planner_benchmark.csv) |
 | Ground-truth isolation guard | ✅ verified | passes, and fails correctly when a violation is injected |
@@ -921,6 +959,15 @@ to work until it has been executed.
 
 ## Limitations
 
+- **Open defect: the obstacle tracker invents obstacles.** In a world
+  containing exactly one moving object it reports a mean of 1.7, and before
+  the aperture rule it peaked at 9. That rate predicts whether a run reaches
+  its goal (r = −0.73) better than any planner setting does, so
+  `predict_obstacle_motion` ships **off** and the local planner treats every
+  obstacle as stationary — the Phase 11 behaviour, collisions included. The
+  feature, its 34 tests and the measurements are kept rather than deleted;
+  [docs/benchmarks.md § 5b](docs/benchmarks.md) has the numbers and
+  [docs/control.md](docs/control.md) has the diagnosis.
 - Localisation is 2D (SE(2)). Slopes, ramps and non-planar motion are out of scope.
 - Mapping is a static occupancy grid, not full SLAM — there is no loop closure
   and no pose-graph optimisation, so long traverses accumulate map error.
@@ -943,11 +990,16 @@ measured, rather than by how interesting it sounds.
   drifts with the estimate and then confirms it, and the filter ends up
   asserting ±0.31° while being wrong by 12°. Nothing else on this list moves a
   number that far.
-- **Velocity obstacles, or a costmap layer inflated along predicted obstacle
-  motion.** Phase 11's crossing obstacle produced a collision in 3 of 3 runs
-  because DWA plans against a still photograph. Both fixes need obstacle
-  velocity, which this stack never estimates — the scan is a set of points with
-  no correspondence between frames.
+- **Make the obstacle tracker trustworthy enough to turn prediction back on.**
+  Phase 11's crossing obstacle produced a collision in 3 of 3 runs because DWA
+  plans against a still photograph. The tracker that fixes that is built and
+  tested, and it is switched off, because it still reports a mean of 1.7
+  moving obstacles in a world containing one. The aperture rule removed the
+  dominant source (walls seen through doorways) and took the mean from 2.37 to
+  1.66; the remainder is unexplained. Cluster splitting and merging between
+  scans is the next suspect — the association step cannot tell a cluster that
+  changed shape from one that moved. Nothing else on this list is blocking a
+  feature that already exists.
 - **Recovery behaviours.** A robot that gets genuinely stuck stays stuck.
 - Replace the EKF with an Unscented or Invariant EKF and compare consistency
   (NEES). The current filter is measurably overconfident — wrong about its own
