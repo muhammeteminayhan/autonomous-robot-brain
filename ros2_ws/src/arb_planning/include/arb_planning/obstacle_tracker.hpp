@@ -143,6 +143,14 @@ public:
   /// Tracks whose velocity is trusted and non-negligible, expressed in the
   /// ROBOT frame: position relative to the robot, and the obstacle's world
   /// velocity rotated into the robot's axes.
+  ///
+  /// The velocity is the obstacle's own, NOT its velocity relative to the
+  /// robot, and subtracting the robot's would be a bug. A DWA rollout starts
+  /// at the origin and integrates the robot forward, so the frame it works
+  /// in is "the robot frame as it was when planning began" -- which stands
+  /// still while the rollout runs. Ego-motion is already accounted for by
+  /// the robot moving inside that frame; removing it here would count it
+  /// twice and make an obstacle appear to chase the robot.
   std::vector<ObstacleTrack> movingInRobotFrame(const arb_core::Pose2D & robot) const;
 
   /// Segment a scan into clusters. Exposed for testing; the gap rule is the

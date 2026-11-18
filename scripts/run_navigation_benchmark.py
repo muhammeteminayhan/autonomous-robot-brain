@@ -33,6 +33,7 @@ import json
 import math
 import os
 import pathlib
+import re
 import shutil
 import signal
 import subprocess
@@ -76,10 +77,16 @@ class NavStack:
     """The full navigation stack, optionally with a moving obstacle."""
 
     def __init__(self, sensor_params: pathlib.Path, log: pathlib.Path,
-                 with_obstacle: bool, predict: bool = True):
+                 with_obstacle: bool, predict: bool = True,
+                 phase_offset_s: float = 0.0, log_tracks: bool = False):
         self.sensor_params = sensor_params
         self.log = log
         self.with_obstacle = with_obstacle
+        # Where the obstacle is in its sweep at simulated time zero. Whether
+        # the robot meets it at all depends on this, so it is the variable
+        # the dynamic-obstacle experiment sweeps rather than leaves to luck.
+        self.phase_offset_s = phase_offset_s
+        self.log_tracks = log_tracks
         # Whether the local planner advances obstacles along their measured
         # velocity. False reproduces the Phase 11 planner exactly, so the two
         # arms differ by one parameter and nothing else.
@@ -113,13 +120,15 @@ class NavStack:
         self.procs.append(self._spawn(
             "ros2", "launch", "arb_planning", "planning.launch.py",
             "local_planner:=true", "unknown_is_lethal:=false",
-            f"predict_obstacle_motion:={'true' if self.predict else 'false'}"))
+            f"predict_obstacle_motion:={'true' if self.predict else 'false'}",
+            f"log_tracks:={'true' if self.log_tracks else 'false'}"))
         if self.with_obstacle:
             self.procs.append(self._spawn(
                 "ros2", "run", "arb_evaluation", "moving_obstacle", "--ros-args",
                 "-p", "use_sim_time:=true",
                 "-p", f"x_m:={OBSTACLE_X}",
-                "-p", f"speed_m_s:={OBSTACLE_SPEED}"))
+                "-p", f"speed_m_s:={OBSTACLE_SPEED}",
+                "-p", f"phase_offset_s:={self.phase_offset_s}"))
         time.sleep(max(0.0, STARTUP_S - 20))
 
     def down(self) -> None:
@@ -142,6 +151,24 @@ class NavStack:
         time.sleep(3)
 
 
+def actual_parameter(node: str, name: str) -> bool | None:
+    """Ask the running node what it ACTUALLY got, not what we meant to send.
+
+    The metrics used to record the value the script intended. When a launch
+    file silently discarded the argument, the file said `predict=False` for
+    runs that predicted -- a label is not a measurement, and a label that
+    disagrees with the system is worse than none.
+    """
+    try:
+        r = subprocess.run(["ros2", "param", "get", node, name],
+                           cwd=REPO_ROOT, capture_output=True, text=True,
+                           timeout=20)
+    except subprocess.TimeoutExpired:
+        return None
+    m = re.search(r"value is:\s*(True|False)", r.stdout)
+    return m.group(1) == "True" if m else None
+
+
 def run_one(seed: int, with_obstacle: bool, out_dir: pathlib.Path,
             work: pathlib.Path, predict: bool = True) -> dict | None:
     arm = "obstacle" if with_obstacle else "clear"
@@ -150,8 +177,15 @@ def run_one(seed: int, with_obstacle: bool, out_dir: pathlib.Path,
     tag = f"nav_{arm}_seed{seed}"
     params = sensor_params_with_seeds(seed, work / f"sensors_seed{seed}.yaml")
     stack = NavStack(params, work / f"{tag}.log", with_obstacle, predict)
+    actual = None
     try:
         stack.up()
+        actual = actual_parameter("/local_planner", "predict_obstacle_motion")
+        if actual is not None and actual != predict:
+            print(f"    WRONG CONFIGURATION: asked for predict={predict}, "
+                  f"the node has {actual}. Not running -- a mislabelled run "
+                  f"is worse than a missing one.")
+            return None
         result = subprocess.run(
             [sys.executable, "scripts/evaluate_navigation.py",
              "--mode", "goal", "--goal", GOAL, "--duration", "180",
@@ -174,7 +208,12 @@ def run_one(seed: int, with_obstacle: bool, out_dir: pathlib.Path,
     metrics = json.loads(path.read_text())
     metrics["seed"] = seed
     metrics["with_obstacle"] = with_obstacle
-    metrics["predict_obstacle_motion"] = predict
+    # What the NODE had, with what we asked for kept beside it. If the two
+    # ever disagree the run is discarded above; recording both means the
+    # file can still be audited afterwards.
+    metrics["predict_obstacle_motion"] = actual if actual is not None else predict
+    metrics["predict_requested"] = predict
+    metrics["predict_confirmed"] = actual is not None
     path.write_text(json.dumps(metrics, indent=2))
     return metrics
 
@@ -347,6 +386,15 @@ def main(argv: list[str] | None = None) -> int:
                       f"(eta {eta:.0f} min)", flush=True)
                 run_one(seed, flag, out_dir, work, predict)
         finally:
+            # KEEP the logs. Each run costs three minutes and its launch log
+            # is the only record of what the stack actually did; deleting it
+            # means a surprising result can only be investigated by paying
+            # for the whole sweep again. Ask me how I know.
+            keep = out_dir / "logs"
+            keep.mkdir(exist_ok=True)
+            for log in work.glob("*.log"):
+                shutil.copy2(log, keep / log.name)
+            print(f"run logs kept in {keep}")
             shutil.rmtree(work, ignore_errors=True)
 
     groups = collect(out_dir)

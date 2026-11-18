@@ -91,10 +91,14 @@ class MovingObstacle(Node):
         self.y_min = self.declare_parameter("y_min_m", -1.1).value
         self.y_max = self.declare_parameter("y_max_m", 1.1).value
         self.speed = self.declare_parameter("speed_m_s", 0.45).value
+        # Where in its sweep the obstacle is at simulated time zero. This is
+        # the experiment's independent variable: the robot's arrival at the
+        # crossing is what decides whether there is an encounter at all, so
+        # leaving the phase uncontrolled leaves the whole result to chance.
+        self.phase_offset = self.declare_parameter("phase_offset_s", 0.0).value
         self.rate_hz = self.declare_parameter("rate_hz", 20.0).value
 
         self.gz = GzNode()
-        self.t0: float | None = None
         self.spawned = False
         self.set_pose_failures = 0
 
@@ -150,15 +154,30 @@ class MovingObstacle(Node):
             self.spawned = self._spawn()
             if not self.spawned:
                 return
-            self.t0 = now
             return
 
-        # A triangle wave: constant speed out and back, so the obstacle's
-        # position is an exact function of elapsed simulated time and repeats
-        # identically in every run.
+        # A triangle wave anchored to the SIMULATION CLOCK, not to spawn.
+        #
+        # It used to be `now - self.t0`, and the comment here claimed the
+        # motion "repeats identically in every run". It did not. `t0` is set
+        # when the spawn call succeeds, which waits on /clock, on Gazebo
+        # being up, and on the service round trip -- so it moved by seconds
+        # between runs. The obstacle's position was reproducible only
+        # relative to an irreproducible instant.
+        #
+        # That mattered more than anything else in the experiment. Whether
+        # the robot meets the obstacle at all depends on the phase it arrives
+        # at, so the arms were not being compared on the same encounter, and
+        # the run-to-run spread swamped the effect being measured: the same
+        # seed and the same code produced both a clean 39.6 s arrival and a
+        # 180 s timeout with a 0.39 m overlap.
+        #
+        # Anchored to sim time, y(t) is a pure function of the clock, and
+        # `phase_offset_s` makes the encounter something to sweep instead of
+        # something to hope for.
         span = abs(self.y_max - self.y_min)
         period = 2.0 * span / max(1e-6, self.speed)
-        phase = math.fmod(now - self.t0, period)
+        phase = math.fmod(now + self.phase_offset, period)
         travelled = self.speed * phase
         y = (self.y_min + travelled if travelled <= span
              else self.y_max - (travelled - span))

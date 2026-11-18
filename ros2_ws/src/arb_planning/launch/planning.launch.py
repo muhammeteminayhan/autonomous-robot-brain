@@ -49,6 +49,21 @@ def generate_launch_description() -> LaunchDescription:
                         "arb_control instead: two publishers on a command "
                         "topic is a robot that does neither thing.",
         ),
+        DeclareLaunchArgument(
+            "predict_obstacle_motion", default_value="true",
+            description="Advance tracked obstacles along their measured "
+                        "velocity when scoring a rollout. False reproduces "
+                        "the Phase 11 planner, which treats every obstacle "
+                        "as stationary -- the baseline the prediction is "
+                        "measured against.",
+        ),
+        DeclareLaunchArgument(
+            "log_tracks", default_value="false",
+            description="Log every tracked mover once a second: position, "
+                        "speed, extent, hit count. Diagnostic only; the "
+                        "count on its own cannot tell a phantom from a "
+                        "real object.",
+        ),
         Node(
             package=PKG,
             executable="global_planner_node",
@@ -72,7 +87,22 @@ def generate_launch_description() -> LaunchDescription:
             output="screen",
             parameters=[
                 LaunchConfiguration("params"),
-                {"use_sim_time": LaunchConfiguration("use_sim_time")},
+                {
+                    "use_sim_time": LaunchConfiguration("use_sim_time"),
+                    # An undeclared `name:=value` on the command line is
+                    # accepted and silently discarded by ros2 launch, so a
+                    # benchmark arm can appear to be configured while every
+                    # run uses the YAML default. That happened: the "no
+                    # prediction" arm ran WITH prediction for its whole
+                    # sweep. tests/integration/test_launch_arguments.py now
+                    # fails if a script passes an argument no launch file
+                    # declares.
+                    "predict_obstacle_motion": ParameterValue(
+                        LaunchConfiguration("predict_obstacle_motion"),
+                        value_type=bool),
+                    "log_tracks": ParameterValue(
+                        LaunchConfiguration("log_tracks"), value_type=bool),
+                },
             ],
             condition=IfCondition(LaunchConfiguration("local_planner")),
         ),

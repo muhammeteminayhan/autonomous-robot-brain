@@ -20,7 +20,10 @@ compile_commands.json
 results/**/*.bag
 results/**/*.db3
 results/**/*.mcap
-# `results/**/raw/*` and not `results/**/raw/`: git will not descend into an
+# `results/**/raw/*
+# Launch logs from benchmark sweeps: kept on disk for diagnosis, too bulky
+# and too machine-specific to version.
+results/**/logs/*` and not `results/**/raw/`: git will not descend into an
 # excluded DIRECTORY, so a trailing-slash rule makes the negations below
 # unreachable and silently drops the per-run metrics with the bulk data.
 results/**/raw/*

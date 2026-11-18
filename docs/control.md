@@ -195,6 +195,132 @@ Distance is measured **along the path**, never as the straight line. On a path
 that turns back, the straight line shrinks while there are still metres to
 drive, and the robot would crawl the whole way round.
 
+### Obstacles that move: the world is not a still photograph
+
+Phase 11 measured DWA driving into a crossing obstacle in **three runs out of
+three**. The planner was not careless; it was answering the wrong question.
+
+DWA rolls a trajectory forward through the obstacle positions it can see
+**right now** and rejects anything that intersects them. A crossing obstacle is
+not in the swept volume when the rollout is computed — it walks into that
+volume afterwards. Every 50 ms cycle the planner correctly re-established that
+the path ahead was clear *of where the obstacle had been*.
+
+Fixing it needs obstacle velocity, and a laser scan does not come with any: it
+is a set of points with no correspondence between one frame and the next.
+
+#### Manufacturing the correspondence
+
+[`obstacle_tracker.hpp`](../ros2_ws/src/arb_planning/include/arb_planning/obstacle_tracker.hpp)
+segments each scan into clusters, matches them against the previous cycle's
+tracks by nearest centroid, and differentiates.
+
+Three parts of that are easy to get wrong, and each has a test named after the
+failure it prevents:
+
+* **Ego-motion compensation.** The scan arrives in the *robot* frame, and the
+  robot is moving, so a stationary wall sweeps past at the robot's own speed.
+  Differencing centroids there reports **every static object as moving at −v**,
+  the planner predicts the whole world sliding towards it, and it refuses to
+  move at all. Centroids are therefore converted to a fixed frame before
+  differencing, and the world velocity rotated back afterwards.
+* **The fixed frame must be `odom`, never `map`.** This is the bug that cost
+  the most, because everything about it looked right. "Convert to a fixed
+  frame" is correct; `map` is a fixed frame; `map` is also the *accurate* one.
+  It is still the wrong answer. REP-105 makes `map → odom` **discontinuous on
+  purpose** — that is where localisation puts its corrections — and the
+  tracker differences centroids over 0.1 s, so it needs a frame that is smooth
+  over 0.1 s, not one that is right on average. A 2 cm scan-match correction
+  at 10 Hz is **0.2 m/s of apparent motion applied to the entire static world
+  at once**. `odom` drifts, and drift is harmless here: it is slow compared to
+  one cycle, and the velocity is rotated back into the robot frame
+  immediately. Measured below.
+* **Walls are not objects.** A wall's centroid slides along it as the robot
+  passes, manufacturing a velocity out of pure geometry. Clusters wider than
+  1.0 m are rejected as structure.
+* **An implausible speed is a tracking failure, not a fast obstacle.** Two
+  different objects matched to each other produce a huge apparent speed;
+  believing it makes the planner dodge something that does not exist.
+
+#### Two rules, because the physics differs
+
+| | static obstacle | moving obstacle |
+|---|---|---|
+| the question | *can I stop before it?* | *will I be there when it is?* |
+| the rule | `v ≤ √(2·d·a_max)` | reject if contact is predicted inside the horizon |
+
+The stopping rule is **far too permissive** for something coming towards you.
+Measured: against a crossing obstacle it only binds at **0.12 m** of
+separation, by which point the collision is already unavoidable. Stopping does
+not help — the obstacle arrives anyway.
+
+The strict rule is **far too conservative** for something that holds still: it
+is "keep the whole horizon clear", which strands a robot with 0.45 m of room.
+It is right for a moving obstacle precisely because the obstacle will move on.
+Refusing to enter its path for two seconds costs two seconds; entering it
+costs a collision.
+
+#### Why `map` is wrong here, and what is still unexplained
+
+The reasoning above is sound and the change stands: a quantity obtained by
+differencing needs a frame that is smooth over the differencing interval, and
+`map` is specified not to be one.
+
+What that change did **not** do is make the phantoms go away. Measured over
+two runs of the same configuration, the tracker reported a mean of 0.8 moving
+obstacles in one and 3.8 in the other, peaking at 9 — in a world containing
+exactly one moving object. So `map → odom` discontinuity was *a* source of
+false velocity, but it is not the dominant one, and the planner is still
+being handed obstacles that do not exist.
+
+**Status: the frame fix is justified but its benefit is not measured, and the
+phantom tracks are an open defect.** The cause is most likely cluster
+instability rather than the frame — a cluster that splits or merges between
+scans moves its own centroid, and the association step cannot tell that from
+motion — but that is a hypothesis, not a result.
+
+`Tracker.APoseThatJUMPSMakesTheStaticWorldLookAlive` pins down the part that
+*is* established: it feeds an unchanged scan with a pose that jumps 15 cm and
+asserts the tracker reports a phantom. It is a characterisation test — it
+asserts the limitation, because the limitation cannot be fixed from inside
+the tracker and the caller is the one who has to supply a smooth frame.
+
+#### Evasion before surrender
+
+Rejecting every forward command and then stopping reproduces the original
+failure exactly: the robot halts and the obstacle walks into it. Measured —
+the first version of this rule fixed **none** of the collisions in a timing
+sweep and made two of them slightly worse.
+
+So when nothing clears, the planner takes the command that buys the most
+**time** rather than the one that feels safest. Reverse is in the window and is
+often the answer.
+
+How much that ordering is worth, measured rather than assumed: scanning the
+whole dynamic window over several threat geometries, the spread between the
+best and worst available contact time is **at most 0.1 s — exactly one
+`simulation_dt`**. The ordering is real but bounded by the predictor's own time
+resolution, and against a symmetric head-on threat there is no spread at all.
+
+#### The score has to be time-aware too, and that was not obvious
+
+Making only the hard constraint time-aware changed nothing: the chosen command
+came out byte-identical to the static-world one. The constraint asks "can I
+stop", the answer is usually yes, and the robot simply does not stop.
+
+What changes the decision is the **clearance score** — a candidate whose
+rollout passes through where the obstacle *will be* has to look bad, so a
+different candidate wins.
+
+#### A single control cycle cannot show any of this
+
+The dynamic window is what the robot can reach in **one** control period: at
+20 Hz with a 1.0 m/s² limit that is 0.1 m/s of velocity range and ±0.15 rad/s
+of turn. Every candidate goes to almost the same place and the scores barely
+differ. Avoidance is emergent over many cycles, which is why the test that
+proves it is a closed-loop simulation swept over crossing timings rather than
+a single `plan()` call.
+
 ### Collision checking steps by distance, not time
 
 Stepping the rollout by time at 0.66 m/s and 0.1 s jumps 6.6 cm between checks,

@@ -114,6 +114,160 @@ tek test seti, ve planlayıcıyı kontrolcüye bağımlı yapmayan bir bağıml�
 Uçtan uca: 16.8 m, 36.5 s, koridordan geçip 1.5 m'lik kapıdan Oda E'ye,
 çarpışmasız, en yakın yaklaşma 0.40 m.
 
+## 7. Sonradan eklenen: hareketli engeller
+
+Phase 11, DWA'nın koridoru geçen bir engele **3 koşunun 3'ünde de** çarptığını
+ölçtü. Planlayıcı dikkatsiz değildi — **yanlış soruyu** cevaplıyordu.
+
+DWA, yörüngeyi **şu anda gördüğü** engel konumları üzerinden ileri sarıyor.
+Geçen bir engel, rollout hesaplandığı anda süpürülen hacmin içinde **değil**;
+oraya **sonradan** yürüyor. Her 50 ms'lik çevrimde planlayıcı, yolun —
+*engelin bulunduğu yerden* — temiz olduğunu doğru biçimde yeniden tespit
+ediyordu.
+
+### Lazer taramasında hız yoktur
+
+Düzeltmek için engel hızı lazım, ama tarama hız içermez: ardışık karelerde
+**hiçbir karşılıklılık (correspondence) olmayan** bir nokta kümesidir. O
+karşılıklılığı üretmek gerekiyor.
+
+`obstacle_tracker` her taramayı **kümelere** ayırıyor, kümeleri önceki
+çevrimin izleriyle **en yakın merkez** kuralıyla eşleştiriyor ve türevliyor.
+
+### Atlanması kolay, atlanması ölümcül adım: ego-hareket telafisi
+
+```
+Tarama ROBOT çerçevesinde gelir, ve robot hareket ediyor.
+  -> Duran bir duvar, robotun kendi hızıyla yanından geçiyormuş gibi görünür.
+  -> Merkezleri ORADA farkını alırsan: her durağan nesne -v hızla hareket ediyor.
+  -> Planlayıcı tüm dünyanın üstüne geldiğini öngörür ve HİÇ hareket etmez.
+```
+
+Bu yüzden merkezler, fark alınmadan **önce sabit çerçeveye** çevriliyor; elde
+edilen dünya hızı da planlayıcı için robot eksenlerine geri döndürülüyor.
+`StaticObstaclesMeasureZeroVelocityWhileTheRobotMoves` testi tam olarak bunu
+doğruluyor.
+
+İki tuzak daha:
+- **Duvarlar nesne değildir.** Duvarın merkezi, robot geçerken duvar boyunca
+  kayar ve saf geometriden bir hız **uydurur**. 1.0 m'den geniş kümeler yapı
+  sayılıp izlenmiyor.
+- **İnanılmaz hız, hızlı engel değil, eşleştirme hatasıdır.** Birbirine
+  eşleşen iki farklı nesne devasa bir görünür hız üretir; buna inanmak
+  planlayıcıyı **var olmayan** bir şeyden kaçırır.
+
+### "Sabit çerçeve" yetmez: HANGİ sabit çerçeve?
+
+Kolayca gözden kaçan, çünkü **her şeyi doğru yapmış gibi** görünen bir
+ayrım. Yukarıdaki kural "sabit çerçeveye çevir" diyor. `map` sabit bir
+çerçeve. Üstelik *doğru* olanı — kayma biriktirmeyen tek çerçeve o. Yine de
+yanlış cevap.
+
+```
+REP-105: map -> odom SÜREKSİZDİR, hem de BİLEREK.
+  Lokalizasyon düzeltmelerini oraya koyar -- işi bu.
+  Her kabul edilen scan match, map->odom'u sıçratır.
+
+İzleyici ise merkez farkını 0.1 s üzerinden alıyor.
+  -> Ona lazım olan "ortalamada doğru" çerçeve değil,
+     "0.1 saniyede PÜRÜZSÜZ" çerçeve.
+
+2 cm'lik bir düzeltme, 10 Hz'de = 0.2 m/s görünür hız.
+  Ve bu hız TÜM DURAĞAN DÜNYAYA aynı anda uygulanır.
+```
+
+`odom` kayar, ama buradaki kayma zararsız: bir çevrime göre yavaş, ve hız
+hemen robot eksenlerine geri döndürülüyor. Yani **doğruluk değil,
+pürüzsüzlük** gerekiyor. Bunlar farklı şeyler ve bu proje bunu zor yoldan
+öğretti.
+
+Peki ölçüm ne dedi? **Burada dürüst olmak gerekiyor.**
+
+İlk koşum muhteşem görünüyordu: hayalet ortalaması 0.8, hedefe 39.6 s'de
+varış, +0.151 m açıklık. Tabloyu yazmaya başlamıştım bile. Sonra aynı
+yapılandırmayı tekrar koşturdum: **hayalet ortalaması 3.84, en çok 9**, ve
+robot 180 s zaman aşımına düşüp engele 0.35 m girdi.
+
+```
+Aynı kod. Aynı tohum. Aynı komut.
+  1. koşum: ortalama 0.8 hayalet, vardı
+  2. koşum: ortalama 3.84 hayalet, varamadı
+
+-> Yani n=1 ile "düzeldi" demek, ölçüm değil TEMENNİ idi.
+```
+
+Doğru sonuç şu: **çerçeve değişikliği gerekçesi sağlam ama faydası
+ölçülmedi**, ve hayalet izler **açık bir kusur olarak duruyor**. `map→odom`
+süreksizliği sahte hızın *bir* kaynağıydı; baskın kaynağı değilmiş.
+
+En olası suçlu artık çerçeve değil, **küme kararsızlığı**: iki tarama
+arasında bölünen ya da birleşen bir küme kendi merkezini oynatır, eşleştirme
+adımı ise bunu gerçek hareketten ayıramaz. Ama bu bir **hipotez**, sonuç
+değil — ve aradaki farkı karıştırmamak bu projenin tüm meselesi.
+
+> **Not:** İkinci koşum da tam temiz değildi — koşarken `moving_obstacle.py`'yi
+> düzenledim, yani test edilen sistemi altından değiştirdim. Sonucu yine de
+> yazıyorum çünkü hayalet sayısı o dosyaya bağlı değil, ama bu bir metodoloji
+> hatasıydı: **ölçüm sürerken ölçülen şeye dokunulmaz.**
+
+> **Mülakat sorusu olarak:** "`map` ve `odom` arasındaki fark nedir?" sorusuna
+> herkes "biri global, biri lokal" der. Asıl cevap: **`odom` pürüzsüz ama
+> kayar, `map` doğru ama sıçrar** — ve hangisini seçeceğin, doğruluk mu
+> süreklilik mi istediğine bağlıdır. Türev alan her şey (hız kestirimi,
+> izleme) `odom` ister; konum soran her şey (hedef, harita) `map` ister.
+
+### İki farklı kural, çünkü fizik farklı
+
+| | durağan engel | hareketli engel |
+|---|---|---|
+| soru | *önünde durabilir miyim?* | *o oradayken ben de orada mı olacağım?* |
+| kural | `v ≤ √(2·d·a_max)` | ufuk içinde temas öngörülüyorsa **reddet** |
+
+Durma kuralı, üstüne gelen bir şey için **fazla hoşgörülü**: ölçüldü, geçen
+bir engele karşı ancak **0.12 m** ayrımda bağlıyor — o noktada çarpışma zaten
+kaçınılmaz. **Durmak işe yaramıyor, engel yine de geliyor.**
+
+Katı kural ise duran bir şey için **fazla muhafazakâr**: "tüm ufku temiz tut"
+demek, 0.45 m boşluğu olan robotu yerinde çiviler. Hareketli engel için doğru,
+çünkü engel **geçip gidecek**: yoluna 2 saniye girmemek 2 saniyeye mal olur,
+girmek bir çarpışmaya.
+
+### Teslim olmadan önce kaçın
+
+Her ileri komutu reddedip sonra durmak, **orijinal hatayı birebir yeniden
+üretiyor**: robot duruyor, engel duran robota yürüyor. Ölçüldü — bu kuralın
+ilk hali zamanlama taramasındaki çarpışmaların **hiçbirini** düzeltmedi,
+ikisini biraz kötüleştirdi.
+
+Bu yüzden hiçbir komut temiz değilse planlayıcı **en çok zaman kazandıran**
+komutu alıyor. Geri gitmek pencerededir ve çoğu zaman cevaptır.
+
+> Bu sıralamanın değeri de **varsayılmadı, ölçüldü**: tüm dinamik pencere
+> birkaç tehdit geometrisi üzerinde tarandığında, en iyi ve en kötü temas
+> süresi arasındaki fark **en fazla 0.1 s** — yani tam olarak bir
+> `simulation_dt`. Sıralama gerçek ama tahmin edicinin kendi zaman
+> çözünürlüğüyle sınırlı.
+
+### Sadece sert kısıtı zaman-farkında yapmak YETMEDİ
+
+Yalnızca `distanceToCollision` zaman-farkında yapıldığında seçilen komut
+statik dünyadakiyle **bit bit aynı** çıktı. Kısıt "durabilir miyim" diye
+soruyor, cevap genelde evet, ve robot zaten durmuyor.
+
+Kararı değiştiren şey **clearance puanı**: rollout'u engelin *gideceği* yerden
+geçen bir adayın **kötü görünmesi** gerekiyor ki başka bir aday kazansın.
+
+### Tek bir çevrim bunu gösteremez
+
+Dinamik pencere, robotun **bir** kontrol periyodunda ulaşabildiği şeydir:
+20 Hz'de 1.0 m/s² limitiyle 0.1 m/s hız aralığı ve ±0.15 rad/s dönüş. Bütün
+adaylar neredeyse aynı yere gider, puanlar kılpayı farklıdır, normalizasyondan
+sonra sıralama değişmez.
+
+**Kaçınma, çok çevrim boyunca ortaya çıkan bir özelliktir** — bu yüzden onu
+kanıtlayan test tek bir `plan()` çağrısı değil, geçiş zamanlamaları üzerinde
+taranmış bir **kapalı çevrim** simülasyonu.
+
 ## Mini görev
 
 > 1. `planning.yaml`'da `clearance_weight`'i 0.7 → 0.0 yap ve

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -89,7 +90,9 @@ public:
     goal_tolerance_ = declare_parameter("goal_tolerance_m", 0.20);
     obstacle_range_ = declare_parameter("obstacle_range_m", 3.0);
     obstacle_stride_ = static_cast<int>(declare_parameter("obstacle_stride", 3));
+    log_tracks_ = declare_parameter("log_tracks", false);
     map_frame_ = declare_parameter("map_frame", std::string("map"));
+    odom_frame_ = declare_parameter("odom_frame", std::string("odom"));
     base_frame_ = declare_parameter("base_frame", std::string("base_link"));
 
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
@@ -216,13 +219,50 @@ private:
           {lidar_offset_x_ + r * std::cos(a), r * std::sin(a)});
       }
 
-      // The tracker differences centroids in a FIXED frame, so it needs the
-      // robot's pose there. `map_to_base` maps map coordinates into the base
-      // frame; the robot's pose in the map is its inverse.
-      const arb_core::Pose2D base_in_map = map_to_base.inverse();
-      const double stamp = rclcpp::Time(scan_->header.stamp).seconds();
-      tracker_->update(all_points, base_in_map, stamp);
-      const auto moving = tracker_->movingInRobotFrame(base_in_map);
+      // THE ODOM FRAME, NOT THE MAP FRAME, and the difference is the whole
+      // reason this works.
+      //
+      // The tracker differences centroids over 0.1 s to get a velocity, so it
+      // needs a frame that is SMOOTH over 0.1 s. `map` is not: REP-105 makes
+      // map -> odom discontinuous on purpose, and every accepted scan match
+      // jumps it. A 2 cm correction at 10 Hz is 0.2 m/s of apparent motion
+      // applied to the entire static world at once.
+      //
+      // Measured with the map frame: the tracker reported 5 to 8 moving
+      // obstacles in a world containing exactly one, the planner dodged
+      // walls that were not moving, and the run that was supposed to
+      // demonstrate the fix collided and took 106 s instead of 39 s.
+      //
+      // `odom -> base_link` drifts but never jumps, which is exactly the
+      // trade a velocity estimate wants: drift over a tenth of a second is
+      // nothing, a discontinuity is everything.
+      arb_core::Pose2D base_in_odom;
+      bool have_odom_tf = false;
+      try {
+        const auto otf = tf_buffer_->lookupTransform(
+          odom_frame_, base_frame_, tf2::TimePointZero);
+        tf2::Quaternion oq(otf.transform.rotation.x, otf.transform.rotation.y,
+                           otf.transform.rotation.z, otf.transform.rotation.w);
+        double oroll = 0.0, opitch = 0.0, oyaw = 0.0;
+        tf2::Matrix3x3(oq).getRPY(oroll, opitch, oyaw);
+        base_in_odom = arb_core::Pose2D(otf.transform.translation.x,
+                                        otf.transform.translation.y, oyaw);
+        have_odom_tf = true;
+      } catch (const tf2::TransformException &) {
+        // Without a smooth frame there is no honest velocity to estimate, so
+        // the tracker is skipped rather than fed the jumpy one.
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+                             "no %s -> %s transform; obstacle velocity "
+                             "estimation disabled this cycle",
+                             odom_frame_.c_str(), base_frame_.c_str());
+      }
+
+      std::vector<ObstacleTrack> moving;
+      if (have_odom_tf) {
+        const double stamp = rclcpp::Time(scan_->header.stamp).seconds();
+        tracker_->update(all_points, base_in_odom, stamp);
+        moving = tracker_->movingInRobotFrame(base_in_odom);
+      }
 
       // The collision check still uses a strided subset -- 120 points instead
       // of 360 is a third of the work for the same answer on surfaces this
@@ -248,6 +288,24 @@ private:
       }
       tracked_moving_ = moving.size();
       moving_obstacle_points_ = moving_points;
+
+      // Diagnostic: one line per tracked mover, at 1 Hz. The counter alone
+      // says "the tracker sees six things"; it cannot say whether they are
+      // six phantoms, one object split six ways, or a wall. Position,
+      // extent and speed distinguish those, and distinguishing them is the
+      // whole job here.
+      if (log_tracks_ && !moving.empty()) {
+        std::ostringstream ss;
+        ss.setf(std::ios::fixed);
+        ss.precision(2);
+        for (const auto & m : moving) {
+          ss << " [" << m.x << "," << m.y << " v=" << std::hypot(m.vx, m.vy)
+             << " ext=" << m.extent_m << " hits=" << m.hits << "]";
+        }
+        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+                             "tracks(%lu):%s", moving.size(),
+                             ss.str().c_str());
+      }
     }
 
     const DwaResult r = planner_->plan(
@@ -271,6 +329,7 @@ private:
       no_tf_);
   }
 
+  bool log_tracks_{false};
   std::unique_ptr<DynamicWindowPlanner> planner_;
   std::unique_ptr<ObstacleTracker> tracker_;
   std::size_t tracked_moving_{0};
@@ -293,6 +352,7 @@ private:
   double lidar_offset_x_{0.14};
   int obstacle_stride_{3};
   std::string map_frame_{"map"}, base_frame_{"base_link"};
+  std::string odom_frame_{"odom"};
   bool reached_{false};
   DwaResult last_result_;
   unsigned long cycles_{0}, failed_cycles_{0}, no_tf_{0};

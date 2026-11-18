@@ -303,6 +303,57 @@ TEST(Tracker, AClockThatRUNSBACKWARDSProducesNoVelocity)
   EXPECT_NEAR(tracker.tracks().front().vy, before_vy, 1e-9);
 }
 
+TEST(Tracker, APoseThatJUMPSMakesTheStaticWorldLookAlive)
+{
+  // A CHARACTERISATION test: this documents a limitation, not a feature.
+  //
+  // The tracker differences centroids in whatever frame it is handed. It
+  // cannot tell a pose correction from real motion -- nothing can, from one
+  // scan -- so when the frame jumps, the entire static world lurches at once.
+  //
+  // That is not hypothetical. The first wiring fed it `map`, and REP-105
+  // makes map -> odom discontinuous ON PURPOSE: every accepted scan match
+  // jumps it. Measured in the simulator, the tracker then reported 5 to 8
+  // moving obstacles in a world containing exactly one, the planner swerved
+  // away from walls that were not moving, and the run meant to demonstrate
+  // obstacle avoidance collided and took 106 s instead of 39 s.
+  //
+  // The fix is the caller's: hand it `odom`, which drifts but never jumps.
+  // This test exists so nobody quietly puts `map` back.
+  ObstacleTracker tracker{TrackerConfig{}};
+  const auto world = worldBlob(3.0, 0.0);      // never moves, not even once
+  const Pose2D truth(0.0, 0.0, 0.0);           // robot never moves either
+
+  // Six honest cycles: the believed pose equals the true pose.
+  for (int i = 0; i < 6; ++i) {
+    tracker.update(toRobot(world, truth), truth, i * 0.1);
+  }
+  ASSERT_FALSE(tracker.tracks().empty());
+  EXPECT_LT(std::hypot(tracker.tracks().front().vx,
+                       tracker.tracks().front().vy),
+            TrackerConfig{}.min_tracked_speed_m_s)
+    << "a smooth pose should leave a stationary object stationary";
+
+  // Now one accepted scan match relocates the robot 15 cm sideways. The
+  // SCAN is unchanged -- the laser still sees the same unmoved object -- but
+  // the pose the tracker is handed has jumped.
+  const Pose2D jumped(0.0, 0.15, 0.0);
+  tracker.update(toRobot(world, truth), jumped, 0.6);
+
+  const double spurious = std::hypot(tracker.tracks().front().vx,
+                                     tracker.tracks().front().vy);
+  EXPECT_GT(spurious, TrackerConfig{}.min_tracked_speed_m_s)
+    << "a 15 cm pose jump produced only " << spurious << " m/s of apparent "
+    << "motion, so this test no longer demonstrates the hazard it exists "
+    << "for -- check whether the filter or the threshold changed";
+
+  // And it is reported as a MOVING obstacle, which is the damage: the
+  // planner will now refuse perfectly good commands to dodge a phantom.
+  EXPECT_FALSE(tracker.movingInRobotFrame(jumped).empty())
+    << "the spurious velocity should reach the planner, which is the "
+    << "entire reason the frame choice matters";
+}
+
 TEST(Tracker, ResetClearsEverything)
 {
   ObstacleTracker tracker{TrackerConfig{}};
