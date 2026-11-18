@@ -39,6 +39,25 @@ so while its sensors are deliberately degraded and failed.
 > See [Verification status](#verification-status) for exactly what has been
 > run.
 
+![The robot mapping an unknown world and driving to a goal through its own map](docs/images/demo.gif)
+
+*One run, start to goal, 69 s of simulated time. The robot begins with no
+map: the olive is everything it has never seen, and it shrinks as the LiDAR
+sweeps. The cyan line is the A\* plan, replanned every time the grid changes
+under it, and the blue dot is the EKF's estimate of where the robot is —
+**not** where it actually is, which is a number this picture deliberately
+does not have. It reached the goal in 36.7 s, 0.30 m from the mark, having
+mapped 242 m².*
+
+*Rendered from the topics by [`scripts/make_demo_gif.py`](scripts/make_demo_gif.py),
+not from a screen recording — so it needs no GUI and no ffmpeg, and it
+reproduces on a headless machine:*
+
+```bash
+ros2 launch arb_bringup bringup.launch.py headless:=true rviz:=false
+python3 scripts/make_demo_gif.py --out docs/images/demo.gif
+```
+
 ![The robot's own map, the A* plan and the EKF pose, in RViz](docs/images/rviz_navigation.png)
 
 *What the robot believes: the occupancy grid it built itself (pale = free,
@@ -898,7 +917,7 @@ to work until it has been executed.
 | Environment (ROS 2 Jazzy, Gazebo Sim 8.15.0, g++ 13.3, CMake 3.28, Eigen 3.4) | ✅ verified | `./scripts/check_environment.sh` → *Environment OK* |
 | `colcon build` | ✅ verified | 11/11 packages, zero stderr |
 | Unit tests (`colcon test`) | ✅ verified | **358 tests, 0 failures** |
-| Integration tests (`pytest tests/integration`) | ✅ verified | **156 passed, 0 skipped.** Run without `source scripts/env.sh` first, 11 of them skip: the live-graph checks cannot find a graph. A green run that skipped its hardest tests looks identical to one that passed them |
+| Integration tests (`pytest tests/integration`) | ✅ verified | **156 passed, 0 skipped** — with the environment sourced *and* the stack running. Without `source scripts/env.sh`, 11 skip for want of `rclpy`; with it but no stack running, 1 skips, and it is the ground-truth isolation check against the live node graph — the most important test in the suite. A green run that skipped its hardest test looks exactly like one that passed it |
 | Unit tests are not vacuous | ✅ verified | **64 code mutations** injected across six packages; all caught (12 escaped first and the tests were strengthened; 1 was an equivalent mutant and was removed). The most recent escape weakened the aperture rule's `&&` to `||` and nothing failed — half the rule was untested until a case for it was written |
 | Guard tests actually bite | ✅ verified | 8 probes against the isolation, config-consistency and docs-consistency guards; every one fails the guard it targets and passes once reverted |
 | Planner benchmark | ✅ measured | [results/phase7/planner_benchmark.csv](results/phase7/planner_benchmark.csv) |
